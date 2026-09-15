@@ -4,10 +4,8 @@ import { PitchData } from '@/types/pitch';
 
 // Configure PDF.js worker - Use local worker file for reliability
 if (typeof window !== 'undefined') {
-  // In production (static export), use the worker from public directory
-  // In development, Next.js dev server serves from public at root
-  const basePath = process.env.NODE_ENV === 'production' ? '/canva-for-pitch' : '';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}/pdf.worker.min.mjs`;
+  // Always use /canva-for-pitch basePath for both dev and production
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `/canva-for-pitch/pdf.worker.min.mjs`;
 }
 
 export interface ParseResult {
