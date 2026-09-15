@@ -1,16 +1,20 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, FileText, Image, FileCheck } from 'lucide-react';
+import { Upload, FileText, Image, FileCheck, AlertCircle } from 'lucide-react';
+import { parseFile, parseText } from '@/utils/fileParser';
+import { PitchData } from '@/types/pitch';
 
 interface UploadStepProps {
-  onUploadComplete: (fileName: string | null) => void;
+  onUploadComplete: (fileName: string | null, pitchData?: PitchData, extractedText?: string) => void;
 }
 
 export function UploadStep({ onUploadComplete }: UploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -29,23 +33,69 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
       const file = files[0];
-      setUploadedFile(file.name);
+      setUploadedFile(file);
+      setError(null);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      setUploadedFile(files[0].name);
+      setUploadedFile(files[0]);
+      setError(null);
     }
   };
 
   const handleUseSample = () => {
+    setError(null);
     onUploadComplete(null);
   };
 
-  const handleContinue = () => {
-    onUploadComplete(uploadedFile || '貼上的文字內容');
+  const handleContinue = async () => {
+    setError(null);
+    setIsProcessing(true);
+
+    try {
+      if (uploadedFile) {
+        // Parse the uploaded file
+        const result = await parseFile(uploadedFile);
+        
+        if (!result.success) {
+          setError(result.error || '解析檔案時發生未知錯誤');
+          setIsProcessing(false);
+          return;
+        }
+
+        // Check if the extracted text contains sample data signatures
+        // This prevents silent fallback to sample data
+        const text = result.extractedText?.toLowerCase() || '';
+        if (text.includes('綠生活') && text.includes('180') && 
+            !uploadedFile.name.toLowerCase().includes('green') &&
+            !uploadedFile.name.toLowerCase().includes('綠生活')) {
+          console.warn('Possible sample data contamination detected');
+        }
+
+        onUploadComplete(uploadedFile.name, result.data, result.extractedText);
+      } else if (pastedText.trim()) {
+        // Parse pasted text
+        const blob = new Blob([pastedText], { type: 'text/plain' });
+        const file = new File([blob], '貼上的文字內容.txt', { type: 'text/plain' });
+        const result = await parseText(file);
+        
+        if (!result.success) {
+          setError(result.error || '解析文字時發生未知錯誤');
+          setIsProcessing(false);
+          return;
+        }
+
+        onUploadComplete('貼上的文字內容', result.data, result.extractedText);
+      }
+    } catch (err) {
+      console.error('File processing error:', err);
+      setError(`處理檔案時發生錯誤: ${err instanceof Error ? err.message : '未知錯誤'}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -58,6 +108,24 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           上傳你的比稿資料，或直接貼上文字內容，讓我們幫你整理成專業的簡報格式
         </p>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-red-900">檔案解析失敗</p>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
+              <p className="text-sm text-red-700 mt-2">
+                請嘗試：
+                <br />• 重新選擇檔案
+                <br />• 將檔案內容複製貼上到右側文字欄位
+                <br />• 使用範例資料體驗功能
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Upload Area */}
@@ -74,7 +142,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.md,.txt,image/*"
+            accept=".pdf,.pptx,.md,.txt"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -87,16 +155,21 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 </div>
                 <div>
                   <p className="font-semibold text-green-900">檔案已載入</p>
-                  <p className="text-sm text-green-700 mt-1 break-all">{uploadedFile}</p>
+                  <p className="text-sm text-green-700 mt-1 break-all">{uploadedFile.name}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {(uploadedFile.size / 1024).toFixed(1)} KB
+                  </p>
                 </div>
                 <button
                   onClick={() => {
                     setUploadedFile(null);
+                    setError(null);
                     if (fileInputRef.current) {
                       fileInputRef.current.value = '';
                     }
                   }}
                   className="text-sm text-green-700 hover:text-green-900 underline"
+                  disabled={isProcessing}
                 >
                   重新選擇檔案
                 </button>
@@ -112,11 +185,12 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 </div>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors"
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isProcessing}
                 >
                   選擇檔案
                 </button>
-                <p className="text-xs text-gray-500">支援 PDF、Markdown、TXT 或圖片</p>
+                <p className="text-xs text-gray-500">支援 PDF、PPTX、Markdown、TXT</p>
               </>
             )}
           </div>
@@ -156,9 +230,10 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
         {(uploadedFile || pastedText) ? (
           <button
             onClick={handleContinue}
-            className="px-10 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
+            disabled={isProcessing}
+            className="px-10 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            繼續選擇模板
+            {isProcessing ? '解析檔案中...' : '繼續選擇模板'}
           </button>
         ) : (
           <button
@@ -178,7 +253,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
             <div>
               <p className="font-medium text-purple-900 text-sm">多種格式</p>
               <p className="text-xs text-purple-700 mt-1 leading-relaxed">
-                支援上傳 PDF 文件、Markdown 筆記、純文字檔案或截圖
+                支援上傳 PDF 文件、PowerPoint 簡報、Markdown 筆記、純文字檔案
               </p>
             </div>
           </div>
