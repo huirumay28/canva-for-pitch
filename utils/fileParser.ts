@@ -14,7 +14,7 @@ type PdfJsLib = {
 
 let pdfjsLoader: Promise<PdfJsLib> | null = null;
 
-function loadPdfJsFromCdn(): Promise<PdfJsLib> {
+function loadPdfJsFromLocal(): Promise<PdfJsLib> {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('PDF 解析只能在瀏覽器中執行'));
   }
@@ -23,27 +23,43 @@ function loadPdfJsFromCdn(): Promise<PdfJsLib> {
   if (pdfjsLoader) return pdfjsLoader;
 
   pdfjsLoader = new Promise<PdfJsLib>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs="4.10.38"]');
+    const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs="local-4.10.38"]');
     if (existing && w.pdfjsLib) {
       resolve(w.pdfjsLib);
       return;
     }
+    
+    // Load pdf.min.mjs as a module
+    const basePath = '/canva-for-pitch';
     const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
-    script.async = true;
-    script.dataset.pdfjs = '4.10.38';
-    script.onload = () => {
+    script.type = 'module';
+    script.dataset.pdfjs = 'local-4.10.38';
+    script.textContent = `
+      import * as pdfjsLib from '${basePath}/pdf.min.mjs';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '${basePath}/pdf.worker.min.mjs';
+      window.pdfjsLib = pdfjsLib;
+      window.dispatchEvent(new CustomEvent('pdfjsLoaded'));
+    `;
+    
+    const handleLoad = () => {
       const lib = (window as Window & { pdfjsLib?: PdfJsLib }).pdfjsLib;
-      if (!lib) {
+      if (lib) {
+        resolve(lib);
+      } else {
         reject(new Error('pdf.js 載入後仍無法使用'));
-        return;
       }
-      lib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
-      resolve(lib);
     };
-    script.onerror = () => reject(new Error('無法從 CDN 載入 pdf.js'));
+    
+    window.addEventListener('pdfjsLoaded', handleLoad, { once: true });
+    script.onerror = () => reject(new Error('無法載入本地 pdf.js'));
     document.head.appendChild(script);
+    
+    // Fallback timeout
+    setTimeout(() => {
+      if (!w.pdfjsLib) {
+        reject(new Error('pdf.js 載入逾時'));
+      }
+    }, 10000);
   });
   return pdfjsLoader;
 }
@@ -73,7 +89,7 @@ export async function parseTextContent(text: string): Promise<ParseResult> {
 }
 
 async function parsePDF(file: File): Promise<ParseResult> {
-  const pdfjsLib = await loadPdfJsFromCdn();
+  const pdfjsLib = await loadPdfJsFromLocal();
   const data = new Uint8Array(await file.arrayBuffer());
 
   // Try data buffer first, then object URL (helps some PDF structures).
