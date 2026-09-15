@@ -1,17 +1,23 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, FileText, Image, FileCheck } from 'lucide-react';
+import { Upload, FileText, Image, FileCheck, AlertCircle, Loader2 } from 'lucide-react';
+import { parseFile, parseTextContent, ParseResult } from '@/utils/fileParser';
+import { PitchData } from '@/types/pitch';
 
 interface UploadStepProps {
-  onUploadComplete: (fileName: string | null) => void;
+  onUploadComplete: (fileName: string | null, pitchData?: PitchData) => void;
 }
 
 export function UploadStep({ onUploadComplete }: UploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<string | null>(null);
   const [pastedText, setPastedText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [parsedData, setParsedData] = useState<PitchData | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentFileRef = useRef<File | null>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -22,21 +28,45 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      const file = files[0];
-      setUploadedFile(file.name);
+      await processFile(files[0]);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      setUploadedFile(files[0].name);
+      await processFile(files[0]);
+    }
+  };
+
+  const processFile = async (file: File) => {
+    setIsProcessing(true);
+    setParseError(null);
+    setUploadedFile(file.name);
+    currentFileRef.current = file;
+
+    try {
+      const result: ParseResult = await parseFile(file);
+      
+      if (result.success && result.data) {
+        setParsedData(result.data);
+        setParseError(null);
+      } else {
+        setParseError(result.error || '檔案解析失敗');
+        setParsedData(null);
+      }
+    } catch (error) {
+      console.error('File processing error:', error);
+      setParseError('檔案處理時發生錯誤，請重試');
+      setParsedData(null);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -44,8 +74,31 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
     onUploadComplete(null);
   };
 
-  const handleContinue = () => {
-    onUploadComplete(uploadedFile || '貼上的文字內容');
+  const handleContinue = async () => {
+    if (pastedText && !parsedData) {
+      // Parse pasted text before continuing
+      setIsProcessing(true);
+      setParseError(null);
+      
+      try {
+        const result: ParseResult = await parseTextContent(pastedText);
+        
+        if (result.success && result.data) {
+          setParsedData(result.data);
+          onUploadComplete('貼上的文字內容', result.data);
+        } else {
+          setParseError(result.error || '文字解析失敗');
+        }
+      } catch (error) {
+        console.error('Text processing error:', error);
+        setParseError('文字處理時發生錯誤，請重試');
+      } finally {
+        setIsProcessing(false);
+      }
+    } else {
+      // File already parsed or data available
+      onUploadComplete(uploadedFile || '貼上的文字內容', parsedData || undefined);
+    }
   };
 
   return (
@@ -92,6 +145,9 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 <button
                   onClick={() => {
                     setUploadedFile(null);
+                    setParsedData(null);
+                    setParseError(null);
+                    currentFileRef.current = null;
                     if (fileInputRef.current) {
                       fileInputRef.current.value = '';
                     }
@@ -151,14 +207,46 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
         </div>
       </div>
 
+      {/* Status Messages */}
+      {isProcessing && (
+        <div className="flex items-center justify-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+          <p className="text-blue-900 font-medium">正在解析檔案內容，請稍候...</p>
+        </div>
+      )}
+
+      {parseError && (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-red-900 font-medium">解析遇到問題</p>
+            <p className="text-sm text-red-700 mt-1">{parseError}</p>
+            <p className="text-xs text-red-600 mt-2">你可以重新上傳檔案，或改用範例資料體驗功能。</p>
+          </div>
+        </div>
+      )}
+
+      {parsedData && !isProcessing && (
+        <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <FileCheck className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-green-900 font-medium">檔案已成功解析</p>
+            <p className="text-sm text-green-700 mt-1">
+              已從檔案擷取重點內容，包含標題、摘要與關鍵數據。格式可能不完整，你可以在後續步驟調整篩選項目。
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Continue or Sample Button */}
       <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
         {(uploadedFile || pastedText) ? (
           <button
             onClick={handleContinue}
-            className="px-10 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
+            disabled={isProcessing}
+            className="px-10 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            繼續選擇模板
+            {isProcessing ? '處理中...' : '繼續選擇模板'}
           </button>
         ) : (
           <button
