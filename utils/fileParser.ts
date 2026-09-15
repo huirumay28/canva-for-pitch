@@ -1,580 +1,212 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
-
-// Configure PDF.js worker to use locally hosted file (avoids CORS issues)
-if (typeof window !== 'undefined') {
-  // Detect basePath from current window location
-  const pathPrefix = window.location.pathname.startsWith('/canva-for-pitch') 
-    ? '/canva-for-pitch' 
-    : '';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `${pathPrefix}/pdf.worker.min.js`;
-}
 
 export interface ParseResult {
   success: boolean;
   data?: PitchData;
-  rawText?: string;
   error?: string;
-  partial?: boolean;
+  extractedText?: string;
 }
 
 /**
- * Parse uploaded file and extract content into PitchData structure
+ * Parse uploaded file into PitchData.
+ * PDF: pdfjs-dist@4 legacy build with disableWorker (no CDN worker / basePath issues).
+ * PPTX/DOCX: JSZip reading Office Open XML text nodes.
  */
 export async function parseFile(file: File): Promise<ParseResult> {
+  const name = file.name.toLowerCase();
   try {
-    const fileType = file.name.toLowerCase();
-    
-    if (fileType.endsWith('.pdf')) {
-      return await parsePDF(file);
-    } else if (fileType.endsWith('.txt') || fileType.endsWith('.md')) {
-      return await parseText(file);
-    } else if (fileType.endsWith('.pptx')) {
-      return await parsePPTX(file);
-    } else if (fileType.endsWith('.docx')) {
-      return await parseDOCX(file);
-    } else {
-      return {
-        success: false,
-        error: '目前僅支援 PDF、TXT、MD、PPTX、DOCX 格式的檔案'
-      };
+    if (name.endsWith('.pdf')) return await parsePDF(file);
+    if (name.endsWith('.pptx')) return await parsePPTX(file);
+    if (name.endsWith('.docx')) return await parseDOCX(file);
+    if (name.endsWith('.txt') || name.endsWith('.md')) {
+      const text = await file.text();
+      return buildResult(text, file.name);
     }
-  } catch (error) {
-    console.error('File parsing error:', error);
     return {
       success: false,
-      error: `檔案解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
+      error: '目前支援 PDF、PPTX、DOCX、TXT、MD。請換成其中一種格式，或把文字貼到下方欄位。',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `檔案解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`,
     };
   }
 }
 
-/**
- * Parse pasted text content
- */
 export async function parseTextContent(text: string): Promise<ParseResult> {
   if (!text.trim()) {
-    return {
-      success: false,
-      error: '請輸入文字內容'
-    };
+    return { success: false, error: '請輸入文字內容' };
   }
-
-  return extractPitchData(text, 'pasted-text');
+  return buildResult(text, 'pasted-text');
 }
 
-/**
- * Parse PDF file using pdfjs-dist
- */
 async function parsePDF(file: File): Promise<ParseResult> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    
-    let fullText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-      fullText += pageText + '\n\n';
-    }
-    
-    return extractPitchData(fullText, file.name);
-  } catch (error) {
-    console.error('PDF parsing error:', error);
+  const data = new Uint8Array(await file.arrayBuffer());
+  // Critical: disableWorker avoids GitHub Pages worker/basePath/CORS failures.
+  const pdf = await pdfjsLib.getDocument({
+    data,
+    disableWorker: true,
+    isEvalSupported: false,
+    useSystemFonts: true,
+    verbosity: 0,
+  }).promise;
+
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    fullText += textContent.items.map((item: { str?: string }) => item.str || '').join(' ') + '\n\n';
+  }
+
+  if (!fullText.trim()) {
     return {
       success: false,
-      error: `PDF 解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
+      error: 'PDF 裡沒有可讀文字（可能是掃描圖）。請改貼文字，或提供可選取文字的 PDF。',
     };
   }
+  return buildResult(fullText, file.name);
 }
 
-/**
- * Parse plain text or markdown file
- */
-async function parseText(file: File): Promise<ParseResult> {
-  try {
-    const text = await file.text();
-    return extractPitchData(text, file.name);
-  } catch (error) {
-    console.error('Text parsing error:', error);
-    return {
-      success: false,
-      error: `文字檔解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
-    };
-  }
-}
-
-/**
- * Parse PPTX file by extracting text from slide XML
- */
 async function parsePPTX(file: File): Promise<ParseResult> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
-    
-    let fullText = '';
-    
-    // Extract text from slides
-    const slideFiles = Object.keys(zip.files)
-      .filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
-      .sort();
-    
-    for (const slideName of slideFiles) {
-      const slideXml = await zip.files[slideName].async('text');
-      // Extract text from <a:t> tags (text runs)
-      const textMatches = slideXml.matchAll(/<a:t>([^<]+)<\/a:t>/g);
-      for (const match of textMatches) {
-        fullText += match[1] + ' ';
-      }
-      fullText += '\n\n';
-    }
-    
-    // Also check notes if present
-    const notesFiles = Object.keys(zip.files)
-      .filter(name => name.startsWith('ppt/notesSlides/') && name.endsWith('.xml'));
-    
-    for (const notesName of notesFiles) {
-      const notesXml = await zip.files[notesName].async('text');
-      const textMatches = notesXml.matchAll(/<a:t>([^<]+)<\/a:t>/g);
-      for (const match of textMatches) {
-        fullText += match[1] + ' ';
-      }
-    }
-    
-    if (!fullText.trim()) {
-      return {
-        success: false,
-        error: 'PPTX 檔案中未找到可解析的文字內容'
-      };
-    }
-    
-    return extractPitchData(fullText, file.name);
-  } catch (error) {
-    console.error('PPTX parsing error:', error);
-    return {
-      success: false,
-      error: `PPTX 解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
-    };
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const slideNames = Object.keys(zip.files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+    .sort((a, b) => {
+      const na = Number(a.match(/slide(\d+)/i)?.[1] || 0);
+      const nb = Number(b.match(/slide(\d+)/i)?.[1] || 0);
+      return na - nb;
+    });
+
+  if (slideNames.length === 0) {
+    return { success: false, error: '這個 PPTX 裡找不到投影片文字。' };
   }
+
+  const parts: string[] = [];
+  for (const name of slideNames) {
+    const xml = await zip.file(name)!.async('string');
+    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map((m) => m[1]);
+    if (texts.length) parts.push(texts.join(''));
+  }
+
+  const fullText = parts.join('\n\n');
+  if (!fullText.trim()) {
+    return { success: false, error: 'PPTX 投影片沒有可讀文字。' };
+  }
+  return buildResult(fullText, file.name);
 }
 
-/**
- * Parse DOCX file by extracting text from document XML
- */
 async function parseDOCX(file: File): Promise<ParseResult> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
-    
-    const documentXml = await zip.file('word/document.xml')?.async('text');
-    if (!documentXml) {
-      return {
-        success: false,
-        error: 'DOCX 檔案格式不正確'
-      };
-    }
-    
-    // Extract text from <w:t> tags (text runs)
-    let fullText = '';
-    const textMatches = documentXml.matchAll(/<w:t[^>]*>([^<]+)<\/w:t>/g);
-    for (const match of textMatches) {
-      fullText += match[1] + ' ';
-    }
-    
-    // Add paragraph breaks
-    fullText = fullText.replace(/(<w:p[^>]*>)/g, '\n\n');
-    
-    if (!fullText.trim()) {
-      return {
-        success: false,
-        error: 'DOCX 檔案中未找到可解析的文字內容'
-      };
-    }
-    
-    return extractPitchData(fullText, file.name);
-  } catch (error) {
-    console.error('DOCX parsing error:', error);
-    return {
-      success: false,
-      error: `DOCX 解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
-    };
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const doc = zip.file('word/document.xml');
+  if (!doc) {
+    return { success: false, error: '這個 DOCX 結構不完整。' };
   }
+  const xml = await doc.async('string');
+  const texts = [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]);
+  const fullText = texts.join('');
+  if (!fullText.trim()) {
+    return { success: false, error: 'DOCX 沒有可讀文字。' };
+  }
+  return buildResult(fullText, file.name);
 }
 
-/**
- * Extract structured PitchData from raw text using heuristics
- */
-function extractPitchData(rawText: string, sourceId: string): ParseResult {
-  const text = rawText.trim();
-  
-  if (!text) {
+function buildResult(rawText: string, sourceId: string): ParseResult {
+  const text = rawText.replace(/\u0000/g, '').trim();
+  if (text.length < 20) {
     return {
       success: false,
-      error: '檔案內容為空'
+      error: '擷取到的文字太少，無法組成提案。請確認檔案不是空白或純圖片。',
     };
   }
 
-  // Extract title (first non-empty line or heading)
-  const lines = text.split('\n').filter(line => line.trim());
-  const title = extractTitle(lines) || '提案簡報';
-  
-  // Extract brief description (first paragraph or summary)
-  const brief = extractBrief(text) || text.substring(0, 300) + (text.length > 300 ? '...' : '');
-  
-  // Extract metrics (numbers with %, 萬, 元, etc.)
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const title = (lines[0] || '提案簡報').slice(0, 120);
+  const brief = text.slice(0, 800);
+
   const metrics = extractMetrics(text);
-  
-  // Extract deliverables (bullet points, numbered lists)
-  const deliverables = extractDeliverables(text);
-  
-  // Extract sections
-  const sections = extractSections(text);
-  
-  // Build PitchData
-  const pitchData: PitchData = {
-    id: `parsed-${Date.now()}`,
+  const bullets = extractBullets(text);
+
+  const data: PitchData = {
+    id: `upload-${sourceId}-${Date.now()}`,
     title,
     brief,
     product: {
-      name: sections.product?.name || extractProductName(text) || '產品名稱',
-      description: sections.product?.description || extractProductDescription(text) || '（從檔案內容擷取）',
-      category: sections.product?.category || '未分類'
+      name: guessField(text, ['產品', 'Product', '品牌']) || title.slice(0, 40),
+      description: brief.slice(0, 240),
+      category: '上傳資料',
     },
     client: {
-      name: sections.client?.name || extractClientName(text) || '客戶名稱',
-      industry: sections.client?.industry || '產業類別',
-      background: sections.client?.background || extractClientBackground(text) || '客戶背景資訊'
+      name: guessField(text, ['客戶', 'Client', '品牌', 'GSK', '台啤']) || '上傳客戶',
+      industry: guessField(text, ['產業', 'Industry']) || '未指定',
+      background: brief.slice(0, 400),
     },
     insights: {
-      trends: sections.insights?.trends || extractTrends(text),
-      opportunities: sections.insights?.opportunities || extractOpportunities(text),
-      challenges: sections.insights?.challenges || extractChallenges(text)
+      trends: bullets.slice(0, 5).length ? bullets.slice(0, 5) : [brief.slice(0, 160)],
+      opportunities: bullets.slice(5, 10),
+      challenges: bullets.slice(10, 15),
     },
-    deliverables: deliverables.length > 0 ? deliverables : ['從檔案內容擷取的交付項目'],
+    deliverables: bullets.length ? bullets.slice(0, 8) : [brief.slice(0, 120)],
     constraints: {
-      budget: extractBudget(text),
-      timeline: extractTimeline(text),
-      requirements: extractRequirements(text)
+      budget: guessField(text, ['預算', 'Budget']),
+      timeline: guessField(text, ['時程', 'Timeline', '時程表']),
+      requirements: bullets.slice(0, 5),
     },
-    metrics,
+    metrics: metrics.length
+      ? metrics
+      : [{ name: '擷取文字量', value: text.length, unit: '字', trend: 'stable' as const }],
     visuals: [],
     keySummary: {
-      objective: sections.keySummary?.objective || extractObjective(text) || '提案目標',
-      approach: sections.keySummary?.approach || extractApproach(text) || '執行方法',
-      expectedOutcome: sections.keySummary?.expectedOutcome || extractExpectedOutcome(text) || '預期成果'
-    }
+      objective: brief.slice(0, 280),
+      approach: bullets[0] || brief.slice(0, 200),
+      expectedOutcome: bullets[1] || brief.slice(200, 400) || brief.slice(0, 200),
+    },
   };
 
-  return {
-    success: true,
-    data: pitchData,
-    rawText: text,
-    partial: true
-  };
+  return { success: true, data, extractedText: text };
 }
 
-// Helper functions for text extraction
-
-function extractTitle(lines: string[]): string | null {
-  if (lines.length === 0) return null;
-  
-  // Look for markdown heading
-  for (const line of lines) {
-    if (line.startsWith('#')) {
-      return line.replace(/^#+\s*/, '').trim();
-    }
-  }
-  
-  // Use first non-empty line if it's short and looks like a title
-  const firstLine = lines[0].trim();
-  if (firstLine.length < 100 && !firstLine.endsWith('.') && !firstLine.endsWith('。')) {
-    return firstLine;
-  }
-  
-  return null;
-}
-
-function extractBrief(text: string): string | null {
-  // Look for sections labeled as brief/summary/overview
-  const briefPatterns = [
-    /(?:簡介|摘要|概述|brief|summary|overview)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i,
-    /(?:專案|project)\s*(?:簡介|brief)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of briefPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-  }
-  
-  // Get first paragraph
-  const paragraphs = text.split(/\n\n+/);
-  if (paragraphs.length > 1) {
-    // Skip title-like first paragraph
-    const secondPara = paragraphs[1].trim();
-    if (secondPara.length > 50) {
-      return secondPara.substring(0, 500);
-    }
-  }
-  
-  return null;
-}
-
-function extractMetrics(text: string): PitchData['metrics'] {
-  const metrics: PitchData['metrics'] = [];
-  
-  // Pattern: number + unit (%, 萬, 億, 元, NT$, etc.)
+function extractMetrics(text: string) {
+  const metrics: { name: string; value: number; unit: string; trend?: 'up' | 'down' | 'stable' }[] = [];
   const patterns = [
-    /(\d+(?:\.\d+)?)\s*%/g,
-    /(?:NT\$|TWD|NT\s*\$)?\s*(\d+(?:\.\d+)?)\s*萬/g,
-    /(?:NT\$|TWD|NT\s*\$)?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*元/g,
-    /(\d+(?:\.\d+)?)\s*億/g
+    /([^\n。，,:]{2,24}?)\s*([0-9]+(?:\.[0-9]+)?)\s*(%|％|萬|億|元)/g,
   ];
-  
-  const metricNames = ['指標', '目標', '數據', '成效'];
-  let metricIndex = 0;
-  
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null && metrics.length < 10) {
-      const value = parseFloat(match[1].replace(/,/g, ''));
-      const fullMatch = match[0];
-      
-      let unit = '%';
-      let adjustedValue = value;
-      
-      if (fullMatch.includes('萬')) {
-        unit = '萬';
-      } else if (fullMatch.includes('億')) {
-        unit = '億';
-      } else if (fullMatch.includes('元')) {
-        unit = '元';
-      }
-      
-      // Try to find context/label before the number
-      const beforeText = text.substring(Math.max(0, match.index - 50), match.index);
-      const contextMatch = beforeText.match(/([^\n。，、]+)$/);
-      const label = contextMatch ? contextMatch[1].trim() : metricNames[metricIndex % metricNames.length];
-      
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) && metrics.length < 6) {
       metrics.push({
-        name: label || `指標 ${metricIndex + 1}`,
-        value: adjustedValue,
-        unit,
-        trend: 'up'
+        name: m[1].trim().slice(-24) || '指標',
+        value: Number(m[2]),
+        unit: m[3].replace('％', '%'),
+        trend: 'stable',
       });
-      
-      metricIndex++;
     }
   }
-  
-  return metrics.slice(0, 6); // Limit to 6 metrics
+  return metrics;
 }
 
-function extractDeliverables(text: string): string[] {
-  const deliverables: string[] = [];
-  
-  // Look for bullet points or numbered lists
-  const bulletPatterns = [
-    /^[\s]*[•\-\*]\s+(.+)$/gm,
-    /^[\s]*\d+[\.)]\s+(.+)$/gm
-  ];
-  
-  for (const pattern of bulletPatterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null && deliverables.length < 20) {
-      const item = match[1].trim();
-      if (item.length > 5 && item.length < 200) {
-        deliverables.push(item);
-      }
+function extractBullets(text: string): string[] {
+  const lines = text.split(/\n+/);
+  const out: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^([•\-\*]|\d+[\.\)、])\s+/.test(t) || (t.length > 12 && t.length < 160)) {
+      const cleaned = t.replace(/^([•\-\*]|\d+[\.\)、])\s+/, '');
+      if (cleaned.length > 8) out.push(cleaned);
     }
+    if (out.length >= 20) break;
   }
-  
-  return deliverables.slice(0, 12);
+  return out;
 }
 
-function extractSections(text: string): any {
-  return {
-    product: null,
-    client: null,
-    insights: null,
-    keySummary: null
-  };
-}
-
-function extractProductName(text: string): string | null {
-  const patterns = [
-    /(?:產品|product|品牌|brand)[名稱\s]*[：:]\s*([^\n]+)/i,
-    /(?:品牌|brand)\s*[：:]?\s*([A-Z][A-Za-z\s]+)/
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 100);
-    }
+function guessField(text: string, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const re = new RegExp(`${key}\\s*[:：]?\\s*([^\\n]{2,60})`);
+    const m = text.match(re);
+    if (m) return m[1].trim();
+    if (text.includes(key) && key.length > 2) return key;
   }
-  
-  return null;
-}
-
-function extractProductDescription(text: string): string | null {
-  const patterns = [
-    /(?:產品|product)\s*(?:說明|description|簡介)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 300);
-    }
-  }
-  
-  return null;
-}
-
-function extractClientName(text: string): string | null {
-  const patterns = [
-    /(?:客戶|client|公司|company)[名稱\s]*[：:]\s*([^\n]+)/i,
-    /(?:for|為)\s+([A-Z][A-Za-z\s&]+)(?:公司|Co\.|Ltd\.|Inc\.)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 100);
-    }
-  }
-  
-  return null;
-}
-
-function extractClientBackground(text: string): string | null {
-  const patterns = [
-    /(?:客戶|client)\s*(?:背景|background)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i,
-    /(?:公司|company)\s*(?:簡介|介紹|background)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 500);
-    }
-  }
-  
-  return null;
-}
-
-function extractTrends(text: string): string[] {
-  return extractListItems(text, ['趨勢', 'trend', '潮流']);
-}
-
-function extractOpportunities(text: string): string[] {
-  return extractListItems(text, ['機會', 'opportunit', '優勢', 'strength']);
-}
-
-function extractChallenges(text: string): string[] {
-  return extractListItems(text, ['挑戰', 'challenge', '問題', 'issue', '困難']);
-}
-
-function extractListItems(text: string, keywords: string[]): string[] {
-  const items: string[] = [];
-  
-  for (const keyword of keywords) {
-    const sectionMatch = text.match(new RegExp(`${keyword}[^\\n]*[：:]([\\s\\S]*?)(?=\\n\\n|\\n[\\u4e00-\\u9fff]+[：:]|$)`, 'i'));
-    if (sectionMatch) {
-      const sectionText = sectionMatch[1];
-      const bulletPoints = sectionText.match(/^[\s]*[•\-\*]\s+(.+)$/gm);
-      if (bulletPoints) {
-        items.push(...bulletPoints.map(bp => bp.replace(/^[\s]*[•\-\*]\s+/, '').trim()));
-      }
-    }
-  }
-  
-  return items.slice(0, 5);
-}
-
-function extractBudget(text: string): string | undefined {
-  const patterns = [
-    /(?:預算|budget)[：:]\s*((?:NT\$|TWD)?\s*[\d,]+\s*(?:萬|億|元))/i,
-    /(NT\$\s*[\d,]+\s*(?:萬|億))/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-  }
-  
   return undefined;
-}
-
-function extractTimeline(text: string): string | undefined {
-  const patterns = [
-    /(?:時程|timeline|期程)[：:]\s*([^\n]+)/i,
-    /(\d+\s*(?:週|周|月|個月|weeks?|months?))/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-  }
-  
-  return undefined;
-}
-
-function extractRequirements(text: string): string[] {
-  return extractListItems(text, ['要求', 'requirement', '條件', 'condition']);
-}
-
-function extractObjective(text: string): string | null {
-  const patterns = [
-    /(?:目標|objective|goal)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 500);
-    }
-  }
-  
-  return null;
-}
-
-function extractApproach(text: string): string | null {
-  const patterns = [
-    /(?:方法|approach|策略|strategy)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i,
-    /(?:執行|execution)\s*(?:方式|方法)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 500);
-    }
-  }
-  
-  return null;
-}
-
-function extractExpectedOutcome(text: string): string | null {
-  const patterns = [
-    /(?:預期|expected)\s*(?:成果|outcome|結果|result)[：:]\s*([^\n]+(?:\n(?!\n)[^\n]+)*)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim().substring(0, 500);
-    }
-  }
-  
-  return null;
 }

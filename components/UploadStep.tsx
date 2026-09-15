@@ -75,30 +75,8 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
   };
 
   const handleContinue = async () => {
-    if (pastedText && !parsedData) {
-      // Parse pasted text before continuing
-      setIsProcessing(true);
-      setParseError(null);
-      
-      try {
-        const result: ParseResult = await parseTextContent(pastedText);
-        
-        if (result.success && result.data) {
-          setParsedData(result.data);
-          onUploadComplete('貼上的文字內容', result.data);
-        } else {
-          setParseError(result.error || '文字解析失敗');
-        }
-      } catch (error) {
-        console.error('Text processing error:', error);
-        setParseError('文字處理時發生錯誤，請重試');
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      // File already parsed or data available
-      onUploadComplete(uploadedFile || '貼上的文字內容', parsedData || undefined);
-    }
+    if (!parsedData) return;
+    onUploadComplete(uploadedFile || '貼上的文字內容', parsedData);
   };
 
   return (
@@ -127,7 +105,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.md,.txt,.pptx,.docx,image/*"
+            accept=".pdf,.pptx,.docx,.txt,.md"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -192,16 +170,39 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
             </div>
             <textarea
               value={pastedText}
-              onChange={(e) => setPastedText(e.target.value)}
+              onChange={(e) => {
+                setPastedText(e.target.value);
+                setParsedData(null);
+                setParseError(null);
+              }}
               placeholder="在這裡貼上你的比稿資料、專案簡介、產品說明或任何想要整理的內容..."
               className="flex-1 w-full px-4 py-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
               rows={8}
             />
-            {pastedText && (
-              <div className="text-sm text-green-600 flex items-center gap-2">
-                <FileCheck className="w-4 h-4" />
-                已輸入 {pastedText.length} 個字元
-              </div>
+            {pastedText && !parsedData && (
+              <button
+                onClick={async () => {
+                  setIsProcessing(true);
+                  setParseError(null);
+                  try {
+                    const result = await parseTextContent(pastedText);
+                    if (result.success && result.data) {
+                      setParsedData(result.data);
+                      setUploadedFile('貼上的文字內容');
+                    } else {
+                      setParseError(result.error || '文字解析失敗');
+                    }
+                  } catch (error) {
+                    setParseError('文字處理時發生錯誤');
+                  } finally {
+                    setIsProcessing(false);
+                  }
+                }}
+                disabled={isProcessing}
+                className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {isProcessing ? '解析中...' : '解析文字內容'}
+              </button>
             )}
           </div>
         </div>
@@ -240,7 +241,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
 
       {/* Continue or Sample Button */}
       <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-        {(uploadedFile || pastedText) ? (
+        {parsedData ? (
           <button
             onClick={handleContinue}
             disabled={isProcessing}
