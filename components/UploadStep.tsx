@@ -51,18 +51,25 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
     setUploadedFile(file.name);
     currentFileRef.current = file;
 
+    console.log('[DEBUG] Processing file:', file.name, 'Size:', file.size, 'bytes');
+
     try {
       const result: ParseResult = await parseFile(file);
       
       if (result.success && result.data) {
+        console.log('[DEBUG] Parse SUCCESS');
+        console.log('[DEBUG] Extracted text length:', result.extractedText?.length || 0);
+        console.log('[DEBUG] First 80 chars:', result.extractedText?.slice(0, 80) || '(empty)');
         setParsedData(result.data);
         setParseError(null);
       } else {
+        console.log('[DEBUG] Parse FAILED:', result.error);
         setParseError(result.error || '檔案解析失敗');
         setParsedData(null);
       }
     } catch (error) {
-      console.error('File processing error:', error);
+      console.error('[DEBUG] File processing exception:', error);
+      console.error('[DEBUG] Exception stack:', error instanceof Error ? error.stack : String(error));
       setParseError('檔案處理時發生錯誤，請重試');
       setParsedData(null);
     } finally {
@@ -127,7 +134,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.md,.txt,.pptx,.docx,image/*"
+            accept=".pdf,.md,.txt"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -172,7 +179,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 >
                   選擇檔案
                 </button>
-                <p className="text-xs text-gray-500">支援 PDF、PPTX、DOCX、Markdown、TXT 或圖片</p>
+                <p className="text-xs text-gray-500">支援 PDF、Markdown、TXT 文字檔案</p>
               </>
             )}
           </div>
@@ -266,7 +273,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
             <div>
               <p className="font-medium text-purple-900 text-sm">多種格式</p>
               <p className="text-xs text-purple-700 mt-1 leading-relaxed">
-                支援上傳 PDF 文件、Markdown 筆記、純文字檔案或截圖
+                支援上傳 PDF 文件、Markdown 筆記或純文字檔案
               </p>
             </div>
           </div>
