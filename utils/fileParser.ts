@@ -3,6 +3,11 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
 
+// Even with disableWorker, we need to set workerSrc to avoid initialization error
+if (typeof window !== 'undefined' && pdfjs.GlobalWorkerOptions) {
+  pdfjs.GlobalWorkerOptions.workerSrc = '';
+}
+
 export interface ParseResult {
   success: boolean;
   data?: PitchData;
