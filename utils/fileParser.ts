@@ -1,3 +1,4 @@
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import { PitchData } from '@/types/pitch';
 
 export interface ParseResult {
@@ -7,53 +8,19 @@ export interface ParseResult {
   extractedText?: string;
 }
 
-// Load pdf.js from jsdelivr CDN at runtime
-let pdfjsLibInstance: any = null;
+// Configure pdf.js worker for GitHub Pages static export
+let workerConfigured = false;
 
-async function loadPdfJs() {
-  if (typeof window === 'undefined') {
-    throw new Error('PDF parsing only works in browser');
-  }
+function configurePdfJsWorker() {
+  if (workerConfigured) return;
   
-  if (pdfjsLibInstance) {
-    console.log('[DEBUG] Using cached pdf.js instance');
-    return pdfjsLibInstance;
-  }
+  // Set worker to local file in public folder (copied during build)
+  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '/canva-for-pitch/pdf.worker.min.js';
   
-  console.log('[DEBUG] Loading pdf.js from CDN...');
+  console.log('[DEBUG] pdf.js version:', (pdfjsLib as any).version);
+  console.log('[DEBUG] workerSrc configured:', (pdfjsLib as any).GlobalWorkerOptions.workerSrc);
   
-  // Load pdf.js UMD build from jsdelivr (very reliable for static sites)
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.js';
-    script.async = true;
-    script.onload = () => {
-      console.log('[DEBUG] pdf.js script loaded from jsdelivr');
-      resolve();
-    };
-    script.onerror = (e) => {
-      console.error('[DEBUG] CDN load error:', e);
-      reject(new Error('pdf.js CDN load failed - network or CSP issue'));
-    };
-    document.head.appendChild(script);
-  });
-  
-  pdfjsLibInstance = (window as any).pdfjsLib;
-  if (!pdfjsLibInstance) {
-    throw new Error('pdf.js script loaded but window.pdfjsLib not found');
-  }
-  
-  // CRITICAL: Set worker source to matching version from jsdelivr
-  if (!pdfjsLibInstance.GlobalWorkerOptions) {
-    pdfjsLibInstance.GlobalWorkerOptions = {};
-  }
-  pdfjsLibInstance.GlobalWorkerOptions.workerSrc = 
-    'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js';
-  
-  console.log('[DEBUG] pdf.js loaded from CDN, version:', pdfjsLibInstance.version);
-  console.log('[DEBUG] workerSrc set to:', pdfjsLibInstance.GlobalWorkerOptions.workerSrc);
-  
-  return pdfjsLibInstance;
+  workerConfigured = true;
 }
 
 /**
