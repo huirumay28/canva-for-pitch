@@ -1,57 +1,57 @@
-# Canva for Pitch
+# 比稿資料平台 | Canva for Pitch
 
-A role-based pitch orientation platform that optimizes how different team members consume pitch materials. The same content automatically adapts to show creatives visual collages, strategists data charts, and business roles executive summaries.
+依角色優化資訊呈現的比稿資料平台。同一份內容自動切換成最適合的格式：創意看視覺拼貼、策略看數據圖表、業務看重點摘要。
 
 ![Canva for Pitch Demo](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js) ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript) ![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-38bdf8?style=flat-square&logo=tailwind-css)
 
-## Features
+## 功能特色
 
-### 🎯 Role-Based Views
+### 🎯 依角色優化視圖
 
-- **Creative Role**: Visual collage layout with mood boards, images, and content inspiration
-- **Strategy Role**: Data-driven charts, metrics, trends, and analytical insights  
-- **Business Role**: Executive summaries with key objectives, deliverables, and outcomes
+- **創意角色**：視覺拼貼呈現，包含情緒板、產品視覺與創意靈感素材
+- **策略角色**：數據圖表導向，展示關鍵指標、市場趨勢與分析洞察
+- **商務角色**：重點摘要總覽，快速掌握專案目標、交付項目與成果
 
-### ⚡ One-Click View Switching
+### ⚡ 一鍵切換視圖
 
-Switch between Collage, Data Charts, and Summary views instantly. The same pitch content renders in three different formats optimized for different consumption styles.
+在拼貼視圖、數據圖表、重點摘要之間即時切換。相同的比稿內容以三種不同格式呈現，適應不同的資訊消化習慣。
 
-### 📦 Demo-Ready
+### 📦 立即試用
 
-Built-in sample pitch pack (sustainable fashion campaign) so the demo works immediately without uploads. Real upload/paste functionality is UI-ready for production extension.
+內建台灣環保時尚品牌的行銷提案範例資料，開啟即可體驗完整功能。未來可擴充上傳與貼上功能。
 
-### 🎨 Clean Canva-Inspired UI
+### 🎨 簡潔 Canva 風格介面
 
-- Minimalist, organized design
-- Smooth transitions and interactions
-- Responsive layout for all screen sizes
-- Beautiful gradient accents and shadows
+- 極簡、有組織的設計
+- 流暢的過場動效與互動
+- 響應式設計，適應各種螢幕尺寸
+- 優雅的漸層色彩與陰影效果
 
-## Tech Stack
+## 技術架構
 
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-- **Images**: Unsplash (demo content)
+- **框架**：Next.js 14 (App Router)
+- **語言**：TypeScript
+- **樣式**：Tailwind CSS
+- **圖示**：Lucide React
+- **示意圖片**：Unsplash（範例內容）
 
-## Getting Started
+## 快速開始
 
-### Prerequisites
+### 環境需求
 
-- Node.js 18.17 or later
-- npm, yarn, or pnpm
+- Node.js 18.17 或更新版本
+- npm、yarn 或 pnpm
 
-### Installation
+### 安裝步驟
 
-1. Clone the repository:
+1. 複製專案：
 
 ```bash
 git clone <your-repo-url>
 cd canva-for-pitch
 ```
 
-2. Install dependencies:
+2. 安裝相依套件：
 
 ```bash
 npm install
@@ -61,7 +61,7 @@ yarn install
 pnpm install
 ```
 
-3. Run the development server:
+3. 啟動開發伺服器：
 
 ```bash
 npm run dev
@@ -71,35 +71,35 @@ yarn dev
 pnpm dev
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+4. 在瀏覽器開啟 [http://localhost:3000](http://localhost:3000)
 
-### Build for Production
+### 正式版建置
 
 ```bash
 npm run build
 npm start
 ```
 
-## Project Structure
+## 專案結構
 
 ```
 canva-for-pitch/
 ├── app/
-│   ├── layout.tsx          # Root layout with metadata
-│   ├── page.tsx            # Main app orchestration
-│   └── globals.css         # Global styles + Tailwind
+│   ├── layout.tsx          # 根佈局與 metadata
+│   ├── page.tsx            # 主要應用程式邏輯
+│   └── globals.css         # 全域樣式 + Tailwind
 ├── components/
-│   ├── Header.tsx          # App header with branding
-│   ├── RoleSelector.tsx    # Role selection cards
-│   ├── ViewSwitcher.tsx    # View toggle buttons
-│   ├── CollageView.tsx     # Creative visual layout
-│   ├── DataView.tsx        # Strategy data/charts view
-│   └── SummaryView.tsx     # Business summary view
+│   ├── Header.tsx          # 應用程式標頭
+│   ├── RoleSelector.tsx    # 角色選擇卡片
+│   ├── ViewSwitcher.tsx    # 視圖切換按鈕
+│   ├── CollageView.tsx     # 創意拼貼視圖
+│   ├── DataView.tsx        # 策略數據視圖
+│   └── SummaryView.tsx     # 商務摘要視圖
 ├── types/
-│   └── pitch.ts            # TypeScript interfaces
+│   └── pitch.ts            # TypeScript 型別定義
 ├── data/
-│   └── samplePitch.ts      # Demo pitch data
-└── public/                 # Static assets
+│   └── samplePitch.ts      # 範例比稿資料
+└── public/                 # 靜態資源
 ```
 
 ## Usage Flow
@@ -132,40 +132,39 @@ Each role has a default view preference:
 
 Users can switch to any view regardless of role, maintaining flexibility while optimizing the initial presentation.
 
-## Customization
+## 客製化
 
-### Adding New Pitch Content
+### 新增比稿內容
 
-Edit `data/samplePitch.ts` or extend the data model to support multiple pitches. The structure is fully typed for easy extension.
+編輯 `data/samplePitch.ts` 或擴充資料模型以支援多份比稿。結構完整定義型別，易於擴充。
 
-### Styling
+### 樣式調整
 
-Tailwind classes throughout. Custom Canva brand colors defined in:
-- `tailwind.config.ts` (theme extension)
-- `app/globals.css` (CSS variables)
+全專案使用 Tailwind classes。自訂 Canva 品牌色定義於：
+- `tailwind.config.ts`（主題擴充）
+- `app/globals.css`（CSS 變數）
 
-### Views
+### 視圖客製
 
-Each view component (`CollageView`, `DataView`, `SummaryView`) is modular and can be customized independently.
+每個視圖元件（`CollageView`、`DataView`、`SummaryView`）皆為模組化設計，可獨立客製。
 
-## Future Enhancements
+## 未來擴充方向
 
-- File upload support (PDF, MD, TXT, images)
-- Text paste with parsing
-- Multiple pitch management
-- Topic/section filtering
-- Export to PDF/presentation formats
-- Team collaboration features
-- Custom view templates
+- 檔案上傳功能（PDF、MD、TXT、圖片）
+- 文字貼上與解析
+- 多份比稿管理
+- 主題／段落篩選
+- 匯出為 PDF／簡報格式
+- 團隊協作功能
 
-## License
+## 授權
 
 MIT
 
-## Contributing
+## 貢獻
 
-Contributions welcome! This is a demo project showcasing role-based content optimization patterns.
+歡迎貢獻！這是展示依角色優化內容呈現模式的示範專案。
 
 ---
 
-Built with ❤️ using Next.js + TypeScript + Tailwind CSS
+使用 Next.js + TypeScript + Tailwind CSS 打造

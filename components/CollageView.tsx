@@ -48,7 +48,7 @@ export function CollageView({ pitch }: CollageViewProps) {
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Key Insights</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">關鍵洞察</h3>
           <div className="space-y-3">
             {pitch.insights.trends.slice(0, 3).map((trend, idx) => (
               <div key={idx} className="flex items-start gap-2">
@@ -60,7 +60,7 @@ export function CollageView({ pitch }: CollageViewProps) {
         </div>
 
         <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Deliverables</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">交付項目</h3>
           <div className="space-y-2">
             {pitch.deliverables.slice(0, 4).map((item, idx) => (
               <div key={idx} className="flex items-center gap-2">
@@ -75,7 +75,7 @@ export function CollageView({ pitch }: CollageViewProps) {
       </div>
 
       <div className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-lg p-6 border border-purple-100">
-        <h3 className="text-lg font-semibold text-gray-900 mb-3">Product: {pitch.product.name}</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">產品：{pitch.product.name}</h3>
         <p className="text-gray-700">{pitch.product.description}</p>
       </div>
     </div>

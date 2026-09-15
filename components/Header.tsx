@@ -15,19 +15,19 @@ export function Header({ onReset }: HeaderProps) {
             <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Canva for Pitch</h1>
-              <p className="text-xs text-gray-600">Role-based pitch orientation</p>
-            </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">比稿資料平台</h1>
+            <p className="text-xs text-gray-600">依角色優化資訊呈現方式</p>
           </div>
-          {onReset && (
-            <button
-              onClick={onReset}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Start Over
-            </button>
-          )}
+        </div>
+        {onReset && (
+          <button
+            onClick={onReset}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            重新開始
+          </button>
+        )}
         </div>
       </div>
     </header>

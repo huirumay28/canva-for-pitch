@@ -11,18 +11,18 @@ interface ViewSwitcherProps {
 const viewConfig = {
   collage: {
     icon: Grid3x3,
-    label: 'Collage',
-    description: 'Visual content layout',
+    label: '拼貼視圖',
+    description: '視覺內容展示',
   },
   data: {
     icon: BarChart2,
-    label: 'Data Charts',
-    description: 'Metrics & trends',
+    label: '數據圖表',
+    description: '指標與趨勢',
   },
   summary: {
     icon: FileText,
-    label: 'Summary',
-    description: 'Key highlights',
+    label: '重點摘要',
+    description: '關鍵亮點',
   },
 };
 

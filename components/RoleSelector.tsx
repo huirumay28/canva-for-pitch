@@ -11,8 +11,8 @@ interface RoleSelectorProps {
 const roleConfig = {
   creative: {
     icon: Palette,
-    label: 'Creative',
-    description: 'Content & visuals',
+    label: '創意',
+    description: '視覺與內容呈現',
     color: 'from-purple-500 to-pink-500',
     bgColor: 'bg-purple-50',
     borderColor: 'border-purple-200',
@@ -20,8 +20,8 @@ const roleConfig = {
   },
   strategy: {
     icon: BarChart3,
-    label: 'Strategy',
-    description: 'Data & trends',
+    label: '策略',
+    description: '數據與趨勢分析',
     color: 'from-blue-500 to-cyan-500',
     bgColor: 'bg-blue-50',
     borderColor: 'border-blue-200',
@@ -29,8 +29,8 @@ const roleConfig = {
   },
   business: {
     icon: Briefcase,
-    label: 'Business',
-    description: 'Key summaries',
+    label: '商務',
+    description: '重點摘要總覽',
     color: 'from-green-500 to-emerald-500',
     bgColor: 'bg-green-50',
     borderColor: 'border-green-200',
