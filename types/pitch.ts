@@ -2,6 +2,29 @@ export type Role = 'creative' | 'strategy' | 'business';
 
 export type ViewType = 'collage' | 'data' | 'summary';
 
+export type TemplateId = 'visual-collage' | 'data-metrics' | 'executive-summary' | 'full-deck' | 'story-narrative';
+
+export interface Template {
+  id: TemplateId;
+  name: string;
+  description: string;
+  thumbnail: string;
+  categories: string[];
+  defaultView: ViewType;
+  defaultInfoBlocks: InfoBlockType[];
+}
+
+export type InfoBlockType = 
+  | 'brief'
+  | 'product'
+  | 'client'
+  | 'insights'
+  | 'deliverables'
+  | 'constraints'
+  | 'metrics'
+  | 'visuals'
+  | 'summary';
+
 export interface PitchData {
   id: string;
   title: string;
