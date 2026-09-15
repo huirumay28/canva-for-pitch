@@ -21,7 +21,11 @@ export interface ParseResult {
 export async function parsePDF(file: File): Promise<ParseResult> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Create a copy of the ArrayBuffer to prevent detachment issues
+    // The worker transfer can detach the original buffer
+    const bufferCopy = arrayBuffer.slice(0);
+    const uint8Array = new Uint8Array(bufferCopy);
 
     // Strategy 1: Try with standard options
     let pdfDoc;
@@ -39,8 +43,10 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       
       // Strategy 2: Try with more permissive options and disable streams
       try {
+        // Create another copy for the second attempt
+        const uint8Array2 = new Uint8Array(arrayBuffer.slice(0));
         pdfDoc = await pdfjsLib.getDocument({
-          data: uint8Array.slice(0), // Create a copy
+          data: uint8Array2,
           useSystemFonts: false,
           verbosity: 0,
           disableAutoFetch: true,
@@ -55,8 +61,10 @@ export async function parsePDF(file: File): Promise<ParseResult> {
         
         // Strategy 3: Try with maximum compatibility options
         try {
+          // Create yet another copy for the third attempt
+          const uint8Array3 = new Uint8Array(arrayBuffer.slice(0));
           pdfDoc = await pdfjsLib.getDocument({
-            data: uint8Array,
+            data: uint8Array3,
             useSystemFonts: false,
             verbosity: 0,
             disableAutoFetch: true,
