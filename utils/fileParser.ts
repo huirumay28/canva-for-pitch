@@ -7,7 +7,7 @@ export interface ParseResult {
   extractedText?: string;
 }
 
-// Load pdf.js from CDN at runtime to bypass Next.js bundling issues
+// Load pdf.js from unpkg CDN (more reliable than cdnjs for GitHub Pages)
 let pdfjsLibInstance: any = null;
 
 async function loadPdfJs() {
@@ -27,19 +27,31 @@ async function loadPdfJs() {
     console.log('[DEBUG] Loading pdf.js from CDN...');
     await new Promise<void>((resolve, reject) => {
       const script = document.createElement('script');
-      // Use UMD build for better GitHub Pages compatibility
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
+      // Try unpkg CDN which is more reliable for static sites
+      script.src = 'https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+      script.type = 'module';
       script.onload = () => {
         console.log('[DEBUG] pdf.js script loaded');
         resolve();
       };
-      script.onerror = () => reject(new Error('pdf.js CDN load failed'));
+      script.onerror = (e) => {
+        console.error('[DEBUG] CDN load error:', e);
+        reject(new Error('pdf.js CDN load failed'));
+      };
       document.head.appendChild(script);
     });
     
-    pdfjsLibInstance = (window as any).pdfjsLib;
+    // For module scripts, need to import it properly
+    try {
+      pdfjsLibInstance = await import('https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.min.mjs');
+      console.log('[DEBUG] pdf.js imported as module');
+    } catch (err) {
+      console.error('[DEBUG] Module import failed, trying window.pdfjsLib');
+      pdfjsLibInstance = (window as any).pdfjsLib;
+    }
+    
     if (!pdfjsLibInstance) {
-      throw new Error('pdf.js loaded but pdfjsLib not found on window');
+      throw new Error('pdf.js loaded but pdfjsLib not found');
     }
   }
   
@@ -48,7 +60,7 @@ async function loadPdfJs() {
     pdfjsLibInstance.GlobalWorkerOptions = {};
   }
   pdfjsLibInstance.GlobalWorkerOptions.workerSrc = 
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
+    'https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
   
   console.log('[DEBUG] pdf.js loaded from CDN, version:', pdfjsLibInstance.version);
   console.log('[DEBUG] workerSrc set to:', pdfjsLibInstance.GlobalWorkerOptions.workerSrc);
