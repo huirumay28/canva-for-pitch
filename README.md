@@ -16,9 +16,13 @@
 
 在拼貼視圖、數據圖表、重點摘要之間即時切換。相同的比稿內容以三種不同格式呈現，適應不同的資訊消化習慣。
 
-### 📦 立即試用
+### 📦 多元輸入方式
 
-內建台灣環保時尚品牌的行銷提案範例資料，開啟即可體驗完整功能。未來可擴充上傳與貼上功能。
+- **上傳檔案**：支援 PDF、TXT、Markdown 格式的比稿文件
+- **貼上文字**：直接複製貼上提案內容，自動解析結構
+- **使用範例**：內建台灣環保時尚品牌的行銷提案範例資料
+
+上傳或貼上的內容會自動解析標題、摘要、關鍵數據與交付項目，即時套用到所有視圖。
 
 ### 🎨 簡潔 Canva 風格介面
 
@@ -33,6 +37,7 @@
 - **語言**：TypeScript
 - **樣式**：Tailwind CSS
 - **圖示**：Lucide React
+- **PDF 解析**：pdfjs-dist（客戶端解析）
 - **示意圖片**：Unsplash（範例內容）
 
 ## 快速開始
@@ -90,24 +95,30 @@ canva-for-pitch/
 │   └── globals.css         # 全域樣式 + Tailwind
 ├── components/
 │   ├── Header.tsx          # 應用程式標頭
-│   ├── RoleSelector.tsx    # 角色選擇卡片
+│   ├── UploadStep.tsx      # 檔案上傳與文字貼上
+│   ├── TemplateGallery.tsx # 模板選擇
+│   ├── InfoFilter.tsx      # 資訊篩選
 │   ├── ViewSwitcher.tsx    # 視圖切換按鈕
 │   ├── CollageView.tsx     # 創意拼貼視圖
 │   ├── DataView.tsx        # 策略數據視圖
 │   └── SummaryView.tsx     # 商務摘要視圖
 ├── types/
 │   └── pitch.ts            # TypeScript 型別定義
+├── utils/
+│   └── fileParser.ts       # 檔案解析與內容擷取
 ├── data/
 │   └── samplePitch.ts      # 範例比稿資料
-└── public/                 # 靜態資源
+└── public/
+    └── test-gsk-pitch.txt  # 測試用範例檔案
 ```
 
 ## Usage Flow
 
-1. **Landing Page**: Introduction to the platform and its benefits
-2. **Role Selection**: Choose Creative, Strategy, or Business role
-3. **Viewing**: See pitch content in role-optimized format
-4. **Switch Views**: Toggle between Collage, Data, and Summary anytime
+1. **Upload Step**: Upload file (PDF/TXT/MD) or paste text content
+2. **Template Selection**: Choose presentation template
+3. **Info Filter**: Select which content sections to show
+4. **Viewing**: See pitch content in chosen format
+5. **Switch Views**: Toggle between Collage, Data, and Summary anytime
 
 ## Key Components
 
@@ -148,14 +159,43 @@ Users can switch to any view regardless of role, maintaining flexibility while o
 
 每個視圖元件（`CollageView`、`DataView`、`SummaryView`）皆為模組化設計，可獨立客製。
 
+## 檔案解析功能
+
+### 支援格式
+
+- **PDF**：使用 pdfjs-dist 在瀏覽器端解析（無需伺服器）
+- **TXT / MD**：純文字與 Markdown 檔案
+- **貼上文字**：從任何來源複製貼上
+
+### 解析能力
+
+採用啟發式（heuristic）模式自動擷取：
+
+- 標題（從 Markdown heading 或首行）
+- 摘要與專案簡介
+- 關鍵數據（數字 + %, 萬, 億, 元）
+- 交付項目（bullet points / numbered lists）
+- 預算與時程
+- 趨勢、機會、挑戰
+- 專案目標與預期成果
+
+### 限制說明
+
+- 複雜 PDF 排版可能無法完美解析
+- 不支援圖片 OCR（僅文字圖層）
+- 適合結構化文件（有標題、條列、標籤）
+- 部分擷取時會顯示提示訊息
+
+即使解析不完整，仍會顯示擷取的內容而非範例資料，使用者可手動調整。
+
 ## 未來擴充方向
 
-- 檔案上傳功能（PDF、MD、TXT、圖片）
-- 文字貼上與解析
-- 多份比稿管理
-- 主題／段落篩選
+- 圖片上傳與視覺素材管理
+- 多份比稿管理與切換
+- 更智慧的內容解析（AI 輔助）
 - 匯出為 PDF／簡報格式
 - 團隊協作功能
+- 自訂模板與樣式
 
 ## 授權
 
