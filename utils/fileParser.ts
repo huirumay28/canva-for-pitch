@@ -1,9 +1,14 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
 
-// Configure PDF.js worker
+// Configure PDF.js worker to use locally hosted file (avoids CORS issues)
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  // Detect basePath from current window location
+  const pathPrefix = window.location.pathname.startsWith('/canva-for-pitch') 
+    ? '/canva-for-pitch' 
+    : '';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${pathPrefix}/pdf.worker.min.js`;
 }
 
 export interface ParseResult {
@@ -25,10 +30,14 @@ export async function parseFile(file: File): Promise<ParseResult> {
       return await parsePDF(file);
     } else if (fileType.endsWith('.txt') || fileType.endsWith('.md')) {
       return await parseText(file);
+    } else if (fileType.endsWith('.pptx')) {
+      return await parsePPTX(file);
+    } else if (fileType.endsWith('.docx')) {
+      return await parseDOCX(file);
     } else {
       return {
         success: false,
-        error: '目前僅支援 PDF、TXT、MD 格式的文字檔案'
+        error: '目前僅支援 PDF、TXT、MD、PPTX、DOCX 格式的檔案'
       };
     }
   } catch (error) {
@@ -94,6 +103,103 @@ async function parseText(file: File): Promise<ParseResult> {
     return {
       success: false,
       error: `文字檔解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
+    };
+  }
+}
+
+/**
+ * Parse PPTX file by extracting text from slide XML
+ */
+async function parsePPTX(file: File): Promise<ParseResult> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    
+    let fullText = '';
+    
+    // Extract text from slides
+    const slideFiles = Object.keys(zip.files)
+      .filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
+      .sort();
+    
+    for (const slideName of slideFiles) {
+      const slideXml = await zip.files[slideName].async('text');
+      // Extract text from <a:t> tags (text runs)
+      const textMatches = slideXml.matchAll(/<a:t>([^<]+)<\/a:t>/g);
+      for (const match of textMatches) {
+        fullText += match[1] + ' ';
+      }
+      fullText += '\n\n';
+    }
+    
+    // Also check notes if present
+    const notesFiles = Object.keys(zip.files)
+      .filter(name => name.startsWith('ppt/notesSlides/') && name.endsWith('.xml'));
+    
+    for (const notesName of notesFiles) {
+      const notesXml = await zip.files[notesName].async('text');
+      const textMatches = notesXml.matchAll(/<a:t>([^<]+)<\/a:t>/g);
+      for (const match of textMatches) {
+        fullText += match[1] + ' ';
+      }
+    }
+    
+    if (!fullText.trim()) {
+      return {
+        success: false,
+        error: 'PPTX 檔案中未找到可解析的文字內容'
+      };
+    }
+    
+    return extractPitchData(fullText, file.name);
+  } catch (error) {
+    console.error('PPTX parsing error:', error);
+    return {
+      success: false,
+      error: `PPTX 解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
+    };
+  }
+}
+
+/**
+ * Parse DOCX file by extracting text from document XML
+ */
+async function parseDOCX(file: File): Promise<ParseResult> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    
+    const documentXml = await zip.file('word/document.xml')?.async('text');
+    if (!documentXml) {
+      return {
+        success: false,
+        error: 'DOCX 檔案格式不正確'
+      };
+    }
+    
+    // Extract text from <w:t> tags (text runs)
+    let fullText = '';
+    const textMatches = documentXml.matchAll(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+    for (const match of textMatches) {
+      fullText += match[1] + ' ';
+    }
+    
+    // Add paragraph breaks
+    fullText = fullText.replace(/(<w:p[^>]*>)/g, '\n\n');
+    
+    if (!fullText.trim()) {
+      return {
+        success: false,
+        error: 'DOCX 檔案中未找到可解析的文字內容'
+      };
+    }
+    
+    return extractPitchData(fullText, file.name);
+  } catch (error) {
+    console.error('DOCX parsing error:', error);
+    return {
+      success: false,
+      error: `DOCX 解析失敗：${error instanceof Error ? error.message : '未知錯誤'}`
     };
   }
 }

@@ -127,7 +127,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.md,.txt,image/*"
+            accept=".pdf,.md,.txt,.pptx,.docx,image/*"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -172,7 +172,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 >
                   選擇檔案
                 </button>
-                <p className="text-xs text-gray-500">支援 PDF、Markdown、TXT 或圖片</p>
+                <p className="text-xs text-gray-500">支援 PDF、PPTX、DOCX、Markdown、TXT 或圖片</p>
               </>
             )}
           </div>
