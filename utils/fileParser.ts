@@ -1,12 +1,7 @@
-import * as pdfjsLib from 'pdfjs-dist';
+// Use legacy build with disableWorker to avoid CORS/worker issues
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
-
-// Configure PDF.js worker - Use local worker file for reliability
-if (typeof window !== 'undefined') {
-  // Always use /canva-for-pitch basePath for both dev and production
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `/canva-for-pitch/pdf.worker.min.mjs`;
-}
 
 export interface ParseResult {
   success: boolean;
@@ -16,101 +11,39 @@ export interface ParseResult {
 }
 
 /**
- * Parse PDF file using pdf.js with multiple fallback strategies
+ * Parse PDF file using legacy pdfjs build with worker disabled
  */
 export async function parsePDF(file: File): Promise<ParseResult> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    
-    // Create a copy of the ArrayBuffer to prevent detachment issues
-    // The worker transfer can detach the original buffer
-    const bufferCopy = arrayBuffer.slice(0);
-    const uint8Array = new Uint8Array(bufferCopy);
-
-    // Strategy 1: Try with standard options
-    let pdfDoc;
-    try {
-      pdfDoc = await pdfjsLib.getDocument({
-        data: uint8Array,
-        useSystemFonts: true,
-        verbosity: 0,
-        disableAutoFetch: false,
-        disableStream: false,
-        standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
-      }).promise;
-    } catch (err1) {
-      console.warn('Strategy 1 failed, trying strategy 2:', err1);
-      
-      // Strategy 2: Try with more permissive options and disable streams
-      try {
-        // Create another copy for the second attempt
-        const uint8Array2 = new Uint8Array(arrayBuffer.slice(0));
-        pdfDoc = await pdfjsLib.getDocument({
-          data: uint8Array2,
-          useSystemFonts: false,
-          verbosity: 0,
-          disableAutoFetch: true,
-          disableStream: true,
-          disableFontFace: false,
-          password: '',
-          stopAtErrors: false,
-          standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
-        }).promise;
-      } catch (err2) {
-        console.warn('Strategy 2 failed, trying strategy 3:', err2);
-        
-        // Strategy 3: Try with maximum compatibility options
-        try {
-          // Create yet another copy for the third attempt
-          const uint8Array3 = new Uint8Array(arrayBuffer.slice(0));
-          pdfDoc = await pdfjsLib.getDocument({
-            data: uint8Array3,
-            useSystemFonts: false,
-            verbosity: 0,
-            disableAutoFetch: true,
-            disableStream: true,
-            disableFontFace: true,
-            password: '',
-            stopAtErrors: false,
-            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/cmaps/',
-            cMapPacked: true,
-            standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
-          }).promise;
-        } catch (err3) {
-          console.error('All PDF parsing strategies failed:', err3);
-          // Try to extract at least some text info from the error
-          const errorMsg = err3 instanceof Error ? err3.message : '未知錯誤';
-          return {
-            success: false,
-            error: `無法解析 PDF 檔案: ${errorMsg}。請嘗試將 PDF 內容複製貼上到文字欄位。`,
-          };
-        }
-      }
-    }
+    const data = new Uint8Array(await file.arrayBuffer());
+    // Use legacy build with worker disabled to avoid CORS issues
+    const doc = await pdfjs.getDocument({ 
+      data, 
+      disableWorker: true, 
+      isEvalSupported: false 
+    } as any).promise;
 
     // Extract text from all pages
-    const numPages = pdfDoc.numPages;
+    const numPages = doc.numPages;
     let fullText = '';
-    let successfulPages = 0;
     
     for (let i = 1; i <= numPages; i++) {
       try {
-        const page = await pdfDoc.getPage(i);
+        const page = await doc.getPage(i);
         const textContent = await page.getTextContent();
         const pageText = textContent.items
           .map((item: any) => item.str)
           .join(' ');
         fullText += pageText + '\n\n';
-        if (pageText.trim()) successfulPages++;
       } catch (pageErr) {
         console.warn(`Failed to extract text from page ${i}:`, pageErr);
       }
     }
 
-    if (!fullText.trim() || successfulPages === 0) {
+    if (!fullText.trim() || fullText.trim().length < 50) {
       return {
         success: false,
-        error: 'PDF 檔案中未找到可讀取的文字內容。檔案可能是掃描版或受保護。請嘗試將內容複製貼上。',
+        error: 'PDF 檔案中未找到足夠的文字內容。檔案可能是掃描版、受保護或僅包含圖片。',
       };
     }
 
@@ -137,77 +70,28 @@ export async function parsePDF(file: File): Promise<ParseResult> {
  */
 export async function parsePPTX(file: File): Promise<ParseResult> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    
-    // Try loading with different JSZip options for better compatibility
-    let zip;
-    try {
-      // Standard load
-      zip = await JSZip.loadAsync(arrayBuffer);
-    } catch (err1) {
-      console.warn('Standard PPTX load failed, trying permissive mode:', err1);
-      
-      try {
-        // Try with checkCRC32 disabled for potentially damaged files
-        zip = await JSZip.loadAsync(arrayBuffer, {
-          checkCRC32: false,
-        });
-      } catch (err2) {
-        console.warn('Permissive load failed, trying with Uint8Array:', err2);
-        
-        try {
-          // Try converting to Uint8Array
-          const uint8Array = new Uint8Array(arrayBuffer);
-          zip = await JSZip.loadAsync(uint8Array, {
-            checkCRC32: false,
-          });
-        } catch (err3) {
-          console.error('All PPTX load strategies failed:', err3);
-          
-          // As a last resort, try to extract just the slide text using regex from raw bytes
-          const text = await tryExtractPPTXTextDirect(arrayBuffer);
-          if (text) {
-            const pitchData = extractPitchDataFromText(text, file.name);
-            return {
-              success: true,
-              data: pitchData,
-              extractedText: text,
-            };
-          }
-          
-          return {
-            success: false,
-            error: `無法解析 PPTX 檔案: ${err3 instanceof Error ? err3.message : '未知錯誤'}。請嘗試將簡報內容複製貼上到文字欄位，或另存為不同格式後重試。`,
-          };
-        }
-      }
-    }
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
     
     // Find all slide XML files
-    const slideFiles: string[] = [];
-    zip.forEach((relativePath, zipEntry) => {
-      if (relativePath.match(/ppt\/slides\/slide\d+\.xml$/i)) {
-        slideFiles.push(relativePath);
-      }
-    });
+    const slides = Object.keys(zip.files).filter(n => /ppt\/slides\/slide\d+\.xml$/.test(n));
 
-    if (slideFiles.length === 0) {
+    if (slides.length === 0) {
       return {
         success: false,
-        error: 'PPTX 檔案中未找到簡報投影片。檔案可能不是有效的 PowerPoint 格式。',
+        error: 'PPTX 檔案中未找到簡報投影片。',
       };
     }
 
     // Sort slides by number
-    slideFiles.sort((a, b) => {
-      const numA = parseInt(a.match(/slide(\d+)\.xml$/i)?.[1] || '0');
-      const numB = parseInt(b.match(/slide(\d+)\.xml$/i)?.[1] || '0');
+    slides.sort((a, b) => {
+      const numA = parseInt(a.match(/slide(\d+)\.xml$/)?.[1] || '0');
+      const numB = parseInt(b.match(/slide(\d+)\.xml$/)?.[1] || '0');
       return numA - numB;
     });
 
     // Extract text from each slide
     let fullText = '';
-    for (const slideFile of slideFiles) {
+    for (const slideFile of slides) {
       try {
         const slideXml = await zip.file(slideFile)?.async('text');
         if (slideXml) {
@@ -235,10 +119,10 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
       }
     }
 
-    if (!fullText.trim()) {
+    if (!fullText.trim() || fullText.trim().length < 50) {
       return {
         success: false,
-        error: 'PPTX 檔案中未找到可讀取的文字內容。投影片可能只包含圖片。',
+        error: 'PPTX 檔案中未找到足夠的文字內容。投影片可能只包含圖片。',
       };
     }
 
@@ -252,39 +136,11 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
     };
   } catch (error) {
     console.error('PPTX parsing error:', error);
+    const errorMsg = error instanceof Error ? error.message : '未知錯誤';
     return {
       success: false,
-      error: `解析 PPTX 時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}。請確認檔案格式正確。`,
+      error: `解析 PPTX 時發生錯誤: ${errorMsg}。請確認檔案格式正確。`,
     };
-  }
-}
-
-/**
- * Last resort: try to extract text directly from PPTX bytes using regex
- */
-async function tryExtractPPTXTextDirect(arrayBuffer: ArrayBuffer): Promise<string | null> {
-  try {
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    const text = decoder.decode(arrayBuffer);
-    
-    // Look for text patterns that appear in PowerPoint XML
-    const matches = text.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
-    if (matches && matches.length > 0) {
-      const extractedText = matches
-        .map(m => m.replace(/<a:t[^>]*>([^<]+)<\/a:t>/, '$1'))
-        .filter(t => t.trim().length > 0)
-        .join(' ');
-      
-      if (extractedText.length > 50) {
-        console.log('Extracted text directly from PPTX bytes');
-        return extractedText;
-      }
-    }
-    
-    return null;
-  } catch (err) {
-    console.warn('Direct text extraction failed:', err);
-    return null;
   }
 }
 
@@ -295,10 +151,10 @@ export async function parseText(file: File): Promise<ParseResult> {
   try {
     const text = await file.text();
     
-    if (!text.trim()) {
+    if (!text.trim() || text.trim().length < 50) {
       return {
         success: false,
-        error: '文字檔案是空的。',
+        error: '文字檔案是空的或內容過少。',
       };
     }
 
@@ -319,31 +175,51 @@ export async function parseText(file: File): Promise<ParseResult> {
 
 /**
  * Extract structured pitch data from raw text
- * This is a best-effort extraction that creates a reasonable structure
+ * Even if heuristics fail, put raw text in title/brief so keywords are visible
  */
 function extractPitchDataFromText(text: string, fileName: string): PitchData {
   // Extract title - look for common patterns or use first significant line
   const lines = text.split('\n').filter(line => line.trim().length > 0);
-  const title = lines[0]?.trim() || fileName.replace(/\.[^/.]+$/, '');
+  
+  // Try to find a title-like line (look for key phrases, all caps, or first substantial line)
+  let title = '';
+  const titlePatterns = [
+    /^(.*(?:brief|proposal|提案|簡報|計畫|企劃|creative|campaign|project)[^\n]{0,100})/i,
+    /^([A-Z\s]{10,80})/,
+    /^([\d]{4}.*(?:GSK|LINE|台啤|品牌|行銷)[^\n]{0,100})/i,
+  ];
+  
+  for (const pattern of titlePatterns) {
+    const match = text.match(pattern);
+    if (match && match[1].trim().length > 10) {
+      title = match[1].trim();
+      break;
+    }
+  }
+  
+  // If no title found, use first line or filename
+  if (!title) {
+    title = lines[0]?.trim().substring(0, 200) || fileName.replace(/\.[^/.]+$/, '');
+  }
 
-  // Extract brief - use first paragraph or first few lines
-  const brief = lines.slice(0, 5).join(' ').substring(0, 500);
+  // Extract brief - use first few lines but make sure we capture key content
+  // Include up to first 1000 chars to ensure important keywords are visible
+  const brief = text.substring(0, 1000).trim();
 
   // Try to extract key information with simple pattern matching
   const lowerText = text.toLowerCase();
   
   // Look for product/brand name
   let productName = '提案產品';
-  const brandMatch = text.match(/品牌[:：\s]+([^\n]{3,50})/i) ||
-                     text.match(/產品[:：\s]+([^\n]{3,50})/i);
+  const brandMatch = text.match(/(?:品牌|產品|brand|product)[:：\s]+([^\n]{3,50})/i) ||
+                     text.match(/(GSK|LINE|台啤|綠生活|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
   if (brandMatch) {
     productName = brandMatch[1].trim();
   }
 
   // Look for client name
   let clientName = '客戶公司';
-  const clientMatch = text.match(/客戶[:：\s]+([^\n]{3,50})/i) ||
-                      text.match(/公司[:：\s]+([^\n]{3,50})/i);
+  const clientMatch = text.match(/(?:客戶|client|company)[:：\s]+([^\n]{3,50})/i);
   if (clientMatch) {
     clientName = clientMatch[1].trim();
   }
