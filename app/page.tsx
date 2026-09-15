@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ViewType, Template, InfoBlockType } from '@/types/pitch';
+import { ViewType, Template, InfoBlockType, PitchData } from '@/types/pitch';
 import { samplePitch } from '@/data/samplePitch';
 import { Header } from '@/components/Header';
 import { UploadStep } from '@/components/UploadStep';
@@ -21,10 +21,19 @@ export default function Home() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [selectedInfoBlocks, setSelectedInfoBlocks] = useState<InfoBlockType[]>([]);
   const [currentView, setCurrentView] = useState<ViewType>('collage');
-  const [pitch] = useState(samplePitch);
+  const [pitch, setPitch] = useState<PitchData>(samplePitch);
 
-  const handleUploadComplete = (fileName: string | null) => {
+  const handleUploadComplete = (fileName: string | null, pitchData?: PitchData) => {
     setUploadedFileName(fileName);
+    
+    // Use provided pitchData if available, otherwise use sample
+    if (pitchData) {
+      setPitch(pitchData);
+    } else {
+      // fileName is null means user clicked "use sample" button
+      setPitch(samplePitch);
+    }
+    
     setAppState('template-selection');
   };
 
@@ -45,6 +54,7 @@ export default function Home() {
     setSelectedTemplate(null);
     setSelectedInfoBlocks([]);
     setCurrentView('collage');
+    setPitch(samplePitch); // Reset to sample on full reset
   };
 
   if (appState === 'upload') {
