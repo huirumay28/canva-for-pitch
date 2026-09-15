@@ -71,6 +71,12 @@ async function parsePDF(file: File): Promise<ParseResult> {
     const loadingTask = pdfjsLib.getDocument({ 
       data,
       verbosity: 0,
+      isEvalSupported: false,
+      useSystemFonts: true,
+      stopAtErrors: false,
+      maxImageSize: -1,
+      cMapUrl: undefined,
+      cMapPacked: false,
     });
     const pdf = await loadingTask.promise;
     console.log('[DEBUG] PDF loaded successfully, pages:', pdf.numPages);
