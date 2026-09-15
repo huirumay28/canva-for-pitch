@@ -2,14 +2,12 @@ import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
 
-// Configure PDF.js worker - Important: Use legacy build for Node.js/server environments
-// and proper worker configuration for client-side
+// Configure PDF.js worker - Use local worker file for reliability
 if (typeof window !== 'undefined') {
-  // For pdfjs-dist 6.x, use the bundled worker file
-  // The worker needs to be available at build time
-  const basePath = typeof window !== 'undefined' && window.location ? window.location.origin + (process.env.NODE_ENV === 'production' ? '/canva-for-pitch' : '') : '';
-  // Use CDN worker that matches our installed version (6.x)
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js`;
+  // In production (static export), use the worker from public directory
+  // In development, Next.js dev server serves from public at root
+  const basePath = process.env.NODE_ENV === 'production' ? '/canva-for-pitch' : '';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}/pdf.worker.min.mjs`;
 }
 
 export interface ParseResult {
@@ -138,31 +136,51 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
     // Try loading with different JSZip options for better compatibility
     let zip;
     try {
-      zip = await JSZip.loadAsync(arrayBuffer, {
-        checkCRC32: false, // Skip CRC check for potentially damaged files
-      });
+      // Standard load
+      zip = await JSZip.loadAsync(arrayBuffer);
     } catch (err1) {
-      console.warn('First PPTX load attempt failed:', err1);
+      console.warn('Standard PPTX load failed, trying permissive mode:', err1);
       
-      // Try with even more permissive options
       try {
+        // Try with checkCRC32 disabled for potentially damaged files
         zip = await JSZip.loadAsync(arrayBuffer, {
           checkCRC32: false,
-          optimizedBinaryString: true,
         });
       } catch (err2) {
-        console.error('All PPTX load strategies failed:', err2);
-        return {
-          success: false,
-          error: `無法解析 PPTX 檔案: ${err2 instanceof Error ? err2.message : '未知錯誤'}。檔案可能損壞或格式不正確。`,
-        };
+        console.warn('Permissive load failed, trying with Uint8Array:', err2);
+        
+        try {
+          // Try converting to Uint8Array
+          const uint8Array = new Uint8Array(arrayBuffer);
+          zip = await JSZip.loadAsync(uint8Array, {
+            checkCRC32: false,
+          });
+        } catch (err3) {
+          console.error('All PPTX load strategies failed:', err3);
+          
+          // As a last resort, try to extract just the slide text using regex from raw bytes
+          const text = await tryExtractPPTXTextDirect(arrayBuffer);
+          if (text) {
+            const pitchData = extractPitchDataFromText(text, file.name);
+            return {
+              success: true,
+              data: pitchData,
+              extractedText: text,
+            };
+          }
+          
+          return {
+            success: false,
+            error: `無法解析 PPTX 檔案: ${err3 instanceof Error ? err3.message : '未知錯誤'}。請嘗試將簡報內容複製貼上到文字欄位，或另存為不同格式後重試。`,
+          };
+        }
       }
     }
     
     // Find all slide XML files
     const slideFiles: string[] = [];
     zip.forEach((relativePath, zipEntry) => {
-      if (relativePath.match(/ppt\/slides\/slide\d+\.xml$/)) {
+      if (relativePath.match(/ppt\/slides\/slide\d+\.xml$/i)) {
         slideFiles.push(relativePath);
       }
     });
@@ -170,14 +188,14 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
     if (slideFiles.length === 0) {
       return {
         success: false,
-        error: 'PPTX 檔案中未找到簡報投影片。',
+        error: 'PPTX 檔案中未找到簡報投影片。檔案可能不是有效的 PowerPoint 格式。',
       };
     }
 
     // Sort slides by number
     slideFiles.sort((a, b) => {
-      const numA = parseInt(a.match(/slide(\d+)\.xml$/)?.[1] || '0');
-      const numB = parseInt(b.match(/slide(\d+)\.xml$/)?.[1] || '0');
+      const numA = parseInt(a.match(/slide(\d+)\.xml$/i)?.[1] || '0');
+      const numB = parseInt(b.match(/slide(\d+)\.xml$/i)?.[1] || '0');
       return numA - numB;
     });
 
@@ -214,7 +232,7 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
     if (!fullText.trim()) {
       return {
         success: false,
-        error: 'PPTX 檔案中未找到可讀取的文字內容。',
+        error: 'PPTX 檔案中未找到可讀取的文字內容。投影片可能只包含圖片。',
       };
     }
 
@@ -232,6 +250,35 @@ export async function parsePPTX(file: File): Promise<ParseResult> {
       success: false,
       error: `解析 PPTX 時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}。請確認檔案格式正確。`,
     };
+  }
+}
+
+/**
+ * Last resort: try to extract text directly from PPTX bytes using regex
+ */
+async function tryExtractPPTXTextDirect(arrayBuffer: ArrayBuffer): Promise<string | null> {
+  try {
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const text = decoder.decode(arrayBuffer);
+    
+    // Look for text patterns that appear in PowerPoint XML
+    const matches = text.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
+    if (matches && matches.length > 0) {
+      const extractedText = matches
+        .map(m => m.replace(/<a:t[^>]*>([^<]+)<\/a:t>/, '$1'))
+        .filter(t => t.trim().length > 0)
+        .join(' ');
+      
+      if (extractedText.length > 50) {
+        console.log('Extracted text directly from PPTX bytes');
+        return extractedText;
+      }
+    }
+    
+    return null;
+  } catch (err) {
+    console.warn('Direct text extraction failed:', err);
+    return null;
   }
 }
 
