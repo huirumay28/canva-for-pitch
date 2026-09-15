@@ -2,11 +2,14 @@ import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
 
-// Configure PDF.js worker - use CDN for better compatibility
+// Configure PDF.js worker - Important: Use legacy build for Node.js/server environments
+// and proper worker configuration for client-side
 if (typeof window !== 'undefined') {
-  // Use a stable CDN version that matches our installed version
-  const pdfjsVersion = '3.11.174'; // Compatible with pdfjs-dist 3.x
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsVersion}/pdf.worker.min.js`;
+  // For pdfjs-dist 6.x, use the bundled worker file
+  // The worker needs to be available at build time
+  const basePath = typeof window !== 'undefined' && window.location ? window.location.origin + (process.env.NODE_ENV === 'production' ? '/canva-for-pitch' : '') : '';
+  // Use CDN worker that matches our installed version (6.x)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js`;
 }
 
 export interface ParseResult {
@@ -33,43 +36,49 @@ export async function parsePDF(file: File): Promise<ParseResult> {
         verbosity: 0,
         disableAutoFetch: false,
         disableStream: false,
+        standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
       }).promise;
     } catch (err1) {
       console.warn('Strategy 1 failed, trying strategy 2:', err1);
       
-      // Strategy 2: Try with more permissive options
+      // Strategy 2: Try with more permissive options and disable streams
       try {
         pdfDoc = await pdfjsLib.getDocument({
           data: uint8Array.slice(0), // Create a copy
-          useSystemFonts: true,
+          useSystemFonts: false,
           verbosity: 0,
           disableAutoFetch: true,
           disableStream: true,
           disableFontFace: false,
           password: '',
+          stopAtErrors: false,
+          standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
         }).promise;
       } catch (err2) {
         console.warn('Strategy 2 failed, trying strategy 3:', err2);
         
-        // Strategy 3: Try with worker disabled
+        // Strategy 3: Try with maximum compatibility options
         try {
-          const originalWorkerSrc = pdfjsLib.GlobalWorkerOptions.workerSrc;
-          pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-          
           pdfDoc = await pdfjsLib.getDocument({
             data: uint8Array,
             useSystemFonts: false,
             verbosity: 0,
-            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+            disableAutoFetch: true,
+            disableStream: true,
+            disableFontFace: true,
+            password: '',
+            stopAtErrors: false,
+            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/cmaps/',
             cMapPacked: true,
+            standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/standard_fonts/',
           }).promise;
-          
-          pdfjsLib.GlobalWorkerOptions.workerSrc = originalWorkerSrc;
         } catch (err3) {
           console.error('All PDF parsing strategies failed:', err3);
+          // Try to extract at least some text info from the error
+          const errorMsg = err3 instanceof Error ? err3.message : '未知錯誤';
           return {
             success: false,
-            error: `無法解析 PDF 檔案。檔案可能損壞或使用了不支援的格式。錯誤: ${err3 instanceof Error ? err3.message : '未知錯誤'}`,
+            error: `無法解析 PDF 檔案: ${errorMsg}。請嘗試將 PDF 內容複製貼上到文字欄位。`,
           };
         }
       }
@@ -78,6 +87,7 @@ export async function parsePDF(file: File): Promise<ParseResult> {
     // Extract text from all pages
     const numPages = pdfDoc.numPages;
     let fullText = '';
+    let successfulPages = 0;
     
     for (let i = 1; i <= numPages; i++) {
       try {
@@ -87,15 +97,16 @@ export async function parsePDF(file: File): Promise<ParseResult> {
           .map((item: any) => item.str)
           .join(' ');
         fullText += pageText + '\n\n';
+        if (pageText.trim()) successfulPages++;
       } catch (pageErr) {
         console.warn(`Failed to extract text from page ${i}:`, pageErr);
       }
     }
 
-    if (!fullText.trim()) {
+    if (!fullText.trim() || successfulPages === 0) {
       return {
         success: false,
-        error: 'PDF 檔案中未找到可讀取的文字內容。',
+        error: 'PDF 檔案中未找到可讀取的文字內容。檔案可能是掃描版或受保護。請嘗試將內容複製貼上。',
       };
     }
 
@@ -109,9 +120,10 @@ export async function parsePDF(file: File): Promise<ParseResult> {
     };
   } catch (error) {
     console.error('PDF parsing error:', error);
+    const errorMsg = error instanceof Error ? error.message : '未知錯誤';
     return {
       success: false,
-      error: `解析 PDF 時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`,
+      error: `解析 PDF 時發生錯誤: ${errorMsg}`,
     };
   }
 }
@@ -122,7 +134,30 @@ export async function parsePDF(file: File): Promise<ParseResult> {
 export async function parsePPTX(file: File): Promise<ParseResult> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
+    
+    // Try loading with different JSZip options for better compatibility
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(arrayBuffer, {
+        checkCRC32: false, // Skip CRC check for potentially damaged files
+      });
+    } catch (err1) {
+      console.warn('First PPTX load attempt failed:', err1);
+      
+      // Try with even more permissive options
+      try {
+        zip = await JSZip.loadAsync(arrayBuffer, {
+          checkCRC32: false,
+          optimizedBinaryString: true,
+        });
+      } catch (err2) {
+        console.error('All PPTX load strategies failed:', err2);
+        return {
+          success: false,
+          error: `無法解析 PPTX 檔案: ${err2 instanceof Error ? err2.message : '未知錯誤'}。檔案可能損壞或格式不正確。`,
+        };
+      }
+    }
     
     // Find all slide XML files
     const slideFiles: string[] = [];
