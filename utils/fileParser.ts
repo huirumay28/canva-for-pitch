@@ -23,35 +23,38 @@ function loadPdfJsFromLocal(): Promise<PdfJsLib> {
   if (pdfjsLoader) return pdfjsLoader;
 
   pdfjsLoader = new Promise<PdfJsLib>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs="local-4.10.38"]');
+    const existing = document.querySelector<HTMLScriptElement>('script[src*="pdf-loader.js"]');
     if (existing && w.pdfjsLib) {
       resolve(w.pdfjsLib);
       return;
     }
     
-    // Load pdf.min.mjs as a module
+    // Load the external loader script
     const basePath = '/canva-for-pitch';
     const script = document.createElement('script');
     script.type = 'module';
-    script.dataset.pdfjs = 'local-4.10.38';
-    script.textContent = `
-      import * as pdfjsLib from '${basePath}/pdf.min.mjs';
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '${basePath}/pdf.worker.min.mjs';
-      window.pdfjsLib = pdfjsLib;
-      window.dispatchEvent(new CustomEvent('pdfjsLoaded'));
-    `;
+    script.src = `${basePath}/pdf-loader.js`;
+    script.async = true;
     
-    const handleLoad = () => {
-      const lib = (window as Window & { pdfjsLib?: PdfJsLib }).pdfjsLib;
-      if (lib) {
-        resolve(lib);
+    const handleLoad = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail && typeof detail === 'object') {
+        resolve(detail);
+      } else if (w.pdfjsLib) {
+        resolve(w.pdfjsLib);
       } else {
         reject(new Error('pdf.js 載入後仍無法使用'));
       }
     };
     
+    const handleError = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      reject(new Error(`無法載入 pdf.js: ${detail || 'unknown error'}`));
+    };
+    
     window.addEventListener('pdfjsLoaded', handleLoad, { once: true });
-    script.onerror = () => reject(new Error('無法載入本地 pdf.js'));
+    window.addEventListener('pdfjsLoadError', handleError, { once: true });
+    script.onerror = () => reject(new Error('PDF loader script 載入失敗'));
     document.head.appendChild(script);
     
     // Fallback timeout
@@ -101,8 +104,12 @@ async function parsePDF(file: File): Promise<ParseResult> {
       isEvalSupported: false,
       useSystemFonts: true,
       stopAtErrors: false,
+      useWorkerFetch: false,
+      disableFontFace: false,
+      enableXfa: true,
     }).promise;
   } catch (err1) {
+    console.warn('ArrayBuffer loading failed, trying object URL:', err1);
     const url = URL.createObjectURL(file);
     try {
       pdfDoc = await pdfjsLib.getDocument({
@@ -111,10 +118,14 @@ async function parsePDF(file: File): Promise<ParseResult> {
         isEvalSupported: false,
         useSystemFonts: true,
         stopAtErrors: false,
+        useWorkerFetch: false,
+        disableFontFace: false,
+        enableXfa: true,
       }).promise;
     } catch (err2) {
       URL.revokeObjectURL(url);
       const msg = err2 instanceof Error ? err2.message : '未知錯誤';
+      console.error('PDF parsing failed:', err2);
       return {
         success: false,
         error: `這個 PDF 讀取失敗（${msg}）。請改存成「文字可選取」的 PDF，或把內容貼到下方文字欄。`,
@@ -129,7 +140,8 @@ async function parsePDF(file: File): Promise<ParseResult> {
       const page = await pdfDoc.getPage(i);
       const textContent = await page.getTextContent();
       fullText += textContent.items.map((item: { str?: string }) => item.str || '').join(' ') + '\n\n';
-    } catch {
+    } catch (pageError) {
+      console.warn(`Page ${i} extraction failed:`, pageError);
       // skip bad page
     }
   }
