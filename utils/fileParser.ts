@@ -2,6 +2,14 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
 
+// Initialize PDF.js worker path (required even when disableWorker is true)
+if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  const basePath = window.location.pathname.startsWith('/canva-for-pitch') 
+    ? '/canva-for-pitch' 
+    : '';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}/pdf.worker.min.js`;
+}
+
 export interface ParseResult {
   success: boolean;
   data?: PitchData;
