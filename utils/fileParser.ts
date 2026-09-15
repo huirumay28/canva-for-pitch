@@ -8,31 +8,52 @@ export interface ParseResult {
 }
 
 // Load pdf.js from CDN at runtime to bypass Next.js bundling issues
+let pdfjsLibInstance: any = null;
+
 async function loadPdfJs() {
   if (typeof window === 'undefined') {
     throw new Error('PDF parsing only works in browser');
   }
   
-  if ((window as any).pdfjsLib) {
-    return (window as any).pdfjsLib;
+  if (pdfjsLibInstance) {
+    console.log('[DEBUG] Using cached pdf.js instance');
+    return pdfjsLibInstance;
   }
   
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    // Use UMD build for better GitHub Pages compatibility
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('pdf.js CDN load failed'));
-    document.head.appendChild(script);
-  });
+  if ((window as any).pdfjsLib) {
+    pdfjsLibInstance = (window as any).pdfjsLib;
+    console.log('[DEBUG] pdf.js already loaded globally');
+  } else {
+    console.log('[DEBUG] Loading pdf.js from CDN...');
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      // Use UMD build for better GitHub Pages compatibility
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
+      script.onload = () => {
+        console.log('[DEBUG] pdf.js script loaded');
+        resolve();
+      };
+      script.onerror = () => reject(new Error('pdf.js CDN load failed'));
+      document.head.appendChild(script);
+    });
+    
+    pdfjsLibInstance = (window as any).pdfjsLib;
+    if (!pdfjsLibInstance) {
+      throw new Error('pdf.js loaded but pdfjsLib not found on window');
+    }
+  }
   
-  const pdfjsLib = (window as any).pdfjsLib;
-  // Set worker source to matching version
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 
+  // CRITICAL: Set worker source to matching version
+  if (!pdfjsLibInstance.GlobalWorkerOptions) {
+    pdfjsLibInstance.GlobalWorkerOptions = {};
+  }
+  pdfjsLibInstance.GlobalWorkerOptions.workerSrc = 
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
   
-  console.log('[DEBUG] pdf.js loaded from CDN, version:', pdfjsLib.version);
-  return pdfjsLib;
+  console.log('[DEBUG] pdf.js loaded from CDN, version:', pdfjsLibInstance.version);
+  console.log('[DEBUG] workerSrc set to:', pdfjsLibInstance.GlobalWorkerOptions.workerSrc);
+  
+  return pdfjsLibInstance;
 }
 
 /**
@@ -70,26 +91,18 @@ export async function parseTextContent(text: string): Promise<ParseResult> {
 
 async function parsePDF(file: File): Promise<ParseResult> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    // Create a fresh copy to avoid any buffer issues
-    const data = new Uint8Array(arrayBuffer.slice(0));
+    // Load pdf.js from CDN
+    const pdfjsLib = await loadPdfJs();
     
-    console.log('[DEBUG] pdfjs-dist version:', (pdfjsLib as any).version || 'unknown');
+    const arrayBuffer = await file.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+    
+    console.log('[DEBUG] pdf.js version:', pdfjsLib.version);
     console.log('[DEBUG] PDF file name:', file.name);
     console.log('[DEBUG] PDF file size:', data.length, 'bytes');
     console.log('[DEBUG] First 8 bytes:', Array.from(data.slice(0, 8)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
     
-    // Critical: disableWorker avoids GitHub Pages worker/basePath/CORS failures.
-    // stopAtErrors: false allows partial parsing if some content fails
-    const loadingTask = pdfjsLib.getDocument({
-      data,
-      disableWorker: true,
-      isEvalSupported: false,
-      useSystemFonts: true,
-      verbosity: 0,
-      stopAtErrors: false,
-    });
-    
+    const loadingTask = pdfjsLib.getDocument({ data });
     const pdf = await loadingTask.promise;
     console.log('[DEBUG] PDF loaded successfully, pages:', pdf.numPages);
 
@@ -106,7 +119,6 @@ async function parsePDF(file: File): Promise<ParseResult> {
         }
       } catch (pageError) {
         console.error(`[DEBUG] Error on page ${i}:`, pageError);
-        // Continue with other pages
       }
     }
 
