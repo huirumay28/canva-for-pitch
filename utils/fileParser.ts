@@ -1,14 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
-import JSZip from 'jszip';
 import { PitchData } from '@/types/pitch';
-
-// Initialize PDF.js worker path (required even when disableWorker is true)
-if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  const basePath = window.location.pathname.startsWith('/canva-for-pitch') 
-    ? '/canva-for-pitch' 
-    : '';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}/pdf.worker.min.js`;
-}
 
 export interface ParseResult {
   success: boolean;
@@ -17,24 +7,57 @@ export interface ParseResult {
   extractedText?: string;
 }
 
-/**
- * Parse uploaded file into PitchData.
- * PDF: pdfjs-dist@4 legacy build with disableWorker (no CDN worker / basePath issues).
- * PPTX/DOCX: JSZip reading Office Open XML text nodes.
- */
+type PdfJsLib = {
+  getDocument: (src: object) => { promise: Promise<any> };
+  GlobalWorkerOptions: { workerSrc: string };
+};
+
+let pdfjsLoader: Promise<PdfJsLib> | null = null;
+
+function loadPdfJsFromCdn(): Promise<PdfJsLib> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('PDF 解析只能在瀏覽器中執行'));
+  }
+  const w = window as Window & { pdfjsLib?: PdfJsLib };
+  if (w.pdfjsLib) return Promise.resolve(w.pdfjsLib);
+  if (pdfjsLoader) return pdfjsLoader;
+
+  pdfjsLoader = new Promise<PdfJsLib>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-pdfjs="4.10.38"]');
+    if (existing && w.pdfjsLib) {
+      resolve(w.pdfjsLib);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
+    script.async = true;
+    script.dataset.pdfjs = '4.10.38';
+    script.onload = () => {
+      const lib = (window as Window & { pdfjsLib?: PdfJsLib }).pdfjsLib;
+      if (!lib) {
+        reject(new Error('pdf.js 載入後仍無法使用'));
+        return;
+      }
+      lib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
+      resolve(lib);
+    };
+    script.onerror = () => reject(new Error('無法從 CDN 載入 pdf.js'));
+    document.head.appendChild(script);
+  });
+  return pdfjsLoader;
+}
+
 export async function parseFile(file: File): Promise<ParseResult> {
   const name = file.name.toLowerCase();
   try {
     if (name.endsWith('.pdf')) return await parsePDF(file);
-    if (name.endsWith('.pptx')) return await parsePPTX(file);
-    if (name.endsWith('.docx')) return await parseDOCX(file);
     if (name.endsWith('.txt') || name.endsWith('.md')) {
-      const text = await file.text();
-      return buildResult(text, file.name);
+      return buildResult(await file.text(), file.name);
     }
     return {
       success: false,
-      error: '目前支援 PDF、PPTX、DOCX、TXT、MD。請換成其中一種格式，或把文字貼到下方欄位。',
+      error: '目前只支援 PDF、TXT、MD。請上傳 PDF，或把文字貼到下方欄位。',
     };
   } catch (error) {
     return {
@@ -45,28 +68,54 @@ export async function parseFile(file: File): Promise<ParseResult> {
 }
 
 export async function parseTextContent(text: string): Promise<ParseResult> {
-  if (!text.trim()) {
-    return { success: false, error: '請輸入文字內容' };
-  }
+  if (!text.trim()) return { success: false, error: '請輸入文字內容' };
   return buildResult(text, 'pasted-text');
 }
 
 async function parsePDF(file: File): Promise<ParseResult> {
+  const pdfjsLib = await loadPdfJsFromCdn();
   const data = new Uint8Array(await file.arrayBuffer());
-  // Critical: disableWorker avoids GitHub Pages worker/basePath/CORS failures.
-  const pdf = await pdfjsLib.getDocument({
-    data,
-    disableWorker: true,
-    isEvalSupported: false,
-    useSystemFonts: true,
-    verbosity: 0,
-  }).promise;
+
+  // Try data buffer first, then object URL (helps some PDF structures).
+  let pdfDoc: any;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({
+      data,
+      verbosity: 0,
+      isEvalSupported: false,
+      useSystemFonts: true,
+      stopAtErrors: false,
+    }).promise;
+  } catch (err1) {
+    const url = URL.createObjectURL(file);
+    try {
+      pdfDoc = await pdfjsLib.getDocument({
+        url,
+        verbosity: 0,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        stopAtErrors: false,
+      }).promise;
+    } catch (err2) {
+      URL.revokeObjectURL(url);
+      const msg = err2 instanceof Error ? err2.message : '未知錯誤';
+      return {
+        success: false,
+        error: `這個 PDF 讀取失敗（${msg}）。請改存成「文字可選取」的 PDF，或把內容貼到下方文字欄。`,
+      };
+    }
+    URL.revokeObjectURL(url);
+  }
 
   let fullText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    fullText += textContent.items.map((item: { str?: string }) => item.str || '').join(' ') + '\n\n';
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    try {
+      const page = await pdfDoc.getPage(i);
+      const textContent = await page.getTextContent();
+      fullText += textContent.items.map((item: { str?: string }) => item.str || '').join(' ') + '\n\n';
+    } catch {
+      // skip bad page
+    }
   }
 
   if (!fullText.trim()) {
@@ -74,49 +123,6 @@ async function parsePDF(file: File): Promise<ParseResult> {
       success: false,
       error: 'PDF 裡沒有可讀文字（可能是掃描圖）。請改貼文字，或提供可選取文字的 PDF。',
     };
-  }
-  return buildResult(fullText, file.name);
-}
-
-async function parsePPTX(file: File): Promise<ParseResult> {
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const slideNames = Object.keys(zip.files)
-    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
-    .sort((a, b) => {
-      const na = Number(a.match(/slide(\d+)/i)?.[1] || 0);
-      const nb = Number(b.match(/slide(\d+)/i)?.[1] || 0);
-      return na - nb;
-    });
-
-  if (slideNames.length === 0) {
-    return { success: false, error: '這個 PPTX 裡找不到投影片文字。' };
-  }
-
-  const parts: string[] = [];
-  for (const name of slideNames) {
-    const xml = await zip.file(name)!.async('string');
-    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map((m) => m[1]);
-    if (texts.length) parts.push(texts.join(''));
-  }
-
-  const fullText = parts.join('\n\n');
-  if (!fullText.trim()) {
-    return { success: false, error: 'PPTX 投影片沒有可讀文字。' };
-  }
-  return buildResult(fullText, file.name);
-}
-
-async function parseDOCX(file: File): Promise<ParseResult> {
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const doc = zip.file('word/document.xml');
-  if (!doc) {
-    return { success: false, error: '這個 DOCX 結構不完整。' };
-  }
-  const xml = await doc.async('string');
-  const texts = [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]);
-  const fullText = texts.join('');
-  if (!fullText.trim()) {
-    return { success: false, error: 'DOCX 沒有可讀文字。' };
   }
   return buildResult(fullText, file.name);
 }

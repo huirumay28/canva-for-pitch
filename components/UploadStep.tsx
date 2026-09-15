@@ -105,7 +105,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.pptx,.docx,.txt,.md"
+            accept=".pdf,.txt,.md"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -150,7 +150,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
                 >
                   選擇檔案
                 </button>
-                <p className="text-xs text-gray-500">支援 PDF、PPTX、DOCX、Markdown、TXT 或圖片</p>
+                <p className="text-xs text-gray-500">支援 PDF、Markdown、TXT</p>
               </>
             )}
           </div>
@@ -222,7 +222,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           <div>
             <p className="text-red-900 font-medium">解析遇到問題</p>
             <p className="text-sm text-red-700 mt-1">{parseError}</p>
-            <p className="text-xs text-red-600 mt-2">你可以重新上傳檔案，或改用範例資料體驗功能。</p>
+            <p className="text-xs text-red-600 mt-2">請重新上傳檔案，或改用下方文字貼上功能。</p>
           </div>
         </div>
       )}
@@ -239,9 +239,9 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
         </div>
       )}
 
-      {/* Continue or Sample Button */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-        {parsedData ? (
+      {/* Continue Button */}
+      {parsedData && (
+        <div className="flex justify-center">
           <button
             onClick={handleContinue}
             disabled={isProcessing}
@@ -249,15 +249,8 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
           >
             {isProcessing ? '處理中...' : '繼續選擇模板'}
           </button>
-        ) : (
-          <button
-            onClick={handleUseSample}
-            className="px-10 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
-          >
-            使用範例資料體驗
-          </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Info Cards */}
       <div className="grid md:grid-cols-3 gap-4 mt-8">
@@ -267,7 +260,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
             <div>
               <p className="font-medium text-purple-900 text-sm">多種格式</p>
               <p className="text-xs text-purple-700 mt-1 leading-relaxed">
-                支援上傳 PDF 文件、Markdown 筆記、純文字檔案或截圖
+                支援上傳 PDF 文件、Markdown 筆記、純文字檔案
               </p>
             </div>
           </div>
@@ -289,7 +282,7 @@ export function UploadStep({ onUploadComplete }: UploadStepProps) {
             <div>
               <p className="font-medium text-green-900 text-sm">快速開始</p>
               <p className="text-xs text-green-700 mt-1 leading-relaxed">
-                沒有資料也沒關係，可以先用範例資料體驗完整流程
+                上傳檔案後，系統會自動解析並擷取關鍵資訊
               </p>
             </div>
           </div>
