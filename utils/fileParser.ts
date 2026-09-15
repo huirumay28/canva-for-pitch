@@ -1,4 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import * as pdfjsLib from 'pdfjs-dist';
 import { PitchData } from '@/types/pitch';
 
 export interface ParseResult {
@@ -58,18 +58,20 @@ export async function parseTextContent(text: string): Promise<ParseResult> {
 
 async function parsePDF(file: File): Promise<ParseResult> {
   try {
-    // Load pdf.js from CDN
-    const pdfjsLib = await loadPdfJs();
+    // Configure worker on first use
+    configurePdfJsWorker();
     
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
     
-    console.log('[DEBUG] pdf.js version:', pdfjsLib.version);
     console.log('[DEBUG] PDF file name:', file.name);
     console.log('[DEBUG] PDF file size:', data.length, 'bytes');
     console.log('[DEBUG] First 8 bytes:', Array.from(data.slice(0, 8)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
     
-    const loadingTask = pdfjsLib.getDocument({ data });
+    const loadingTask = pdfjsLib.getDocument({ 
+      data,
+      verbosity: 0,
+    });
     const pdf = await loadingTask.promise;
     console.log('[DEBUG] PDF loaded successfully, pages:', pdf.numPages);
 
